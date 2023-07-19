@@ -1,24 +1,38 @@
 from SpacePyTraders import client
 import time
 import threading
+from datetime import datetime
 
 USERNAME = "EKMON"
 TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZXJzaW9uIjoidjIiLCJyZXNldF9kYXRlIjoiMjAyMy0wNy0xNSIsImlhdCI6MTY4OTQ0NTA5Mywic3ViIjoiYWdlbnQtdG9rZW4ifQ.TovM6gCtQCVEY3M8m5RVVioTXrYa8RBGDeArPjVMrUI2UD-NYFwvH4QCb9dXFKWUoAFWmjxrF84L1Ctw85omq2jhQSS390SZBstG6DHrqyhT__2XVuO1RLHy1-o-stXF5mSaG6DTROfkoMZMLo_WEpSy9SvHF9Qj5kowOPF_odFf2q433C0gtFKpSPaOO86_bFffRoGKSgkgyds5VlqkJgfVUGhFoawOitDtEBnUUWnlWj7JF9Mefk43kRvA2Cdxncg14BV2HD3qMCDIZ1tIbQPnbJJX4jiPWEc3yIDemSkPTHebKIf1uxy8wkQqJ6Hrmu_7UR1HpnatQ9nbFEBxrg"
 
 myClient = client.Client(USERNAME, TOKEN)
 
-ALL_SHIPS = ["EKMON-1", "EKMON-3", "EKMON-4"]
+MINING_SHIPS = ["EKMON-1", "EKMON-3", "EKMON-4", "EKMON-5", "EKMON-6", "EKMON-7", "EKMON-8", "EKMON-9", "EKMON-A", "EKMON-B", "EKMON-C", "EKMON-D", "EKMON-E", "EKMON-F", "EKMON-10", "EKMON-11", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E", "EKMON-1F", "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24", "EKMON-25", "EKMON-26", "EKMON-27"]
 
-    #[, "EKMON-5", "EKMON-6", "EKMON-7", "EKMON-8", "EKMON-9", "EKMON-A", "EKMON-B", "EKMON-C", "EKMON-D", "EKMON-E", "EKMON-F", "EKMON-10", "EKMON-11", "EKMON-12" "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E", "EKMON-1F"]
+PROBE_SHIPS = ["EKMON-2", "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A"]
+WAYPOINTS = ['X1-JF24-77691C', 'X1-JF24-06790Z', 'X1-JF24-97552X', 'X1-JF24-78153C', 'X1-JF24-01924F', 'X1-JF24-23225F', 'X1-JF24-45556D', 'X1-JF24-73757X', 'X1-JF24-34538X', 'X1-JF24-00189Z']
+
+WAYPOINT_PROBES = [('X1-JF24-73757X', "EKMON-2"),
+                   ('X1-JF24-77691C', 'EKMON-12'),
+                   ('X1-JF24-06790Z', 'EKMON-13'),
+                   ('X1-JF24-97552X', 'EKMON-14'),
+                   ('X1-JF24-78153C', 'EKMON-15'),
+                   ('X1-JF24-01924F', 'EKMON-16'),
+                   ('X1-JF24-23225F', 'EKMON-17'),
+                   ('X1-JF24-45556D', 'EKMON-18'),
+                   ('X1-JF24-34538X', 'EKMON-19'),
+                   ('X1-JF24-00189Z', 'EKMON-1A')]
 
 
-SHIP = "EKMON-3"
+SYSTEM = "X1-JF24"
+SHIP = "EKMON-1"
 
-CONTRACT = "clk4bzl9t000hs60cins0j1ay"
-ITEM = "IRON_ORE"
+CONTRACT = "clk7qfnk228k4s60cmldw2ck7"
+ITEM = []
 
 ASTEROIDS = "X1-JF24-23225F"
-DELIVERY = "X1-JF24-97552X"
+DELIVERY = "X1-JF24-73757X"
 
 
 def extract(ship):
@@ -51,6 +65,11 @@ def sell(ship, saved):
             params = {"symbol": symbol, "units": units}
             print(myClient.generic_api_call("POST", endpoint, params, TOKEN))
 
+def purchase(ship, item, units):
+    endpoint = "v2/my/ships/" + ship + "/purchase"
+    params = {"symbol": item, "units": units}
+    print(myClient.generic_api_call("POST", endpoint, params, TOKEN))
+
 
 def navigate(ship, location):
     endpoint = "v2/my/ships/" + ship + "/navigate"
@@ -67,43 +86,67 @@ def refuel(ship):
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
 
 
+def nav_to_time_delay(nav):
+    try:
+        start = nav["data"]["nav"]["route"]["departureTime"]
+        end = nav["data"]["nav"]["route"]["arrival"]
+        startdt = datetime.strptime(start, '%Y-%m-%dT%H:%M:%S.%fZ')
+        enddt = datetime.strptime(end, '%Y-%m-%dT%H:%M:%S.%fZ')
+        diff = enddt - startdt
+        sec = diff.total_seconds()
+        return sec
+    except TypeError:
+        return 60
+
+
+
+
+
+
 
 def shipLoop(ship):
+    orbit(ship)
     while True:
-        orbit(ship)
-        time.sleep(1)
-        print(ship + ": " + str(extract(ship)))
-        time.sleep(1)
-        dock(ship)
-        time.sleep(1)
-        sell(ship, ITEM)
-        time.sleep(1)
+        extraction = extract(ship)
+        print(ship + ": " + str(extraction))
         c = cargo(ship)["data"]
         capacity = c["capacity"]
         collected = c["units"]
-        print(ship + ": " + str(collected) + "/" + str(capacity))
-        if collected/capacity >= 0.8:
-            print(ship + ": " + str(refuel(ship)))
-            time.sleep(1)
-            orbit(ship)
-            time.sleep(1)
-            print(ship + ": " + str(navigate(ship, DELIVERY)))
-            print(ship + ": " + "En route to delivery")
-            time.sleep(50)
+        if collected / capacity >= 0.8:
             dock(ship)
-            time.sleep(1)
-            print(ship + ": " + str(deliver(ship, ITEM, collected, CONTRACT)))
-            time.sleep(1)
-            print(ship + ": " + str(refuel(ship)))
-            time.sleep(1)
-            orbit(ship)
-            time.sleep(1)
-            print(ship + ": " + str(navigate(ship, ASTEROIDS)))
-            print(ship + ": " + "En route to asteroids")
-            time.sleep(50)
-            print(ship + ": " + "Returned to asteroids")
+            sell(ship, ITEM)
+            c = cargo(ship)["data"]
+            capacity = c["capacity"]
+            collected = c["units"]
+            print(ship + ": " + str(collected) + "/" + str(capacity))
+            if collected/capacity >= 0.8:
+                print(ship + ": " + str(refuel(ship)))
+                orbit(ship)
+                nav = navigate(ship, DELIVERY)
+                print(ship + ": " + "En route to delivery")
+                time.sleep(nav_to_time_delay(nav) + 1)
+                dock(ship)
+                print(ship + ": " + str(deliver(ship, ITEM, collected, CONTRACT)))
+                print(ship + ": " + str(refuel(ship)))
+                orbit(ship)
+                nav = navigate(ship, ASTEROIDS)
+                print(ship + ": " + "En route to asteroids")
+                time.sleep(nav_to_time_delay(nav) + 1)
+                print(ship + ": " + "Returned to asteroids")
+            else:
+                orbit(ship)
+                try:
+                    cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
+                    time.sleep(cooldown)
+                except TypeError:
+                    time.sleep(70)
         else:
-            time.sleep(70)
+            try:
+                cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
+                time.sleep(cooldown)
+            except TypeError:
+                time.sleep(70)
+
 
 
 
@@ -114,20 +157,20 @@ def shipLoop(ship):
 
 
 def main1():
-    for ship in ALL_SHIPS:
+    for ship in MINING_SHIPS:
         orbit(ship)
     time.sleep(1)
-    for ship in ALL_SHIPS:
+    for ship in MINING_SHIPS:
         print(extract(ship))
 
 def main2():
-    for ship in ALL_SHIPS:
+    for ship in MINING_SHIPS:
         dock(ship)
-    for ship in ALL_SHIPS:
+    for ship in MINING_SHIPS:
         sell(ship, ITEM)
 
 def main3():
-    for ship in ALL_SHIPS:
+    for ship in MINING_SHIPS:
         print(ship)
         print(cargo(ship))
 
@@ -136,12 +179,13 @@ def main4():
 
 
 def main5():
-    miningDrones = ALL_SHIPS
+    miningDrones = MINING_SHIPS
     threads = []
     for drone in miningDrones:
         x = threading.Thread(target=shipLoop, args=(drone,), daemon=True)
         threads.append(x)
         x.start()
+        time.sleep(1.5)
     for t in threads:
         t.join()
 
