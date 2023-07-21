@@ -16,6 +16,11 @@ def buyOreHound():
     params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": SHIPYARD}
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
+    try:
+        purchase(shipName, "MOUNT_MINING_LASER_II", 1)
+        installMount(shipName, "MOUNT_MINING_LASER_II")
+    except TypeError:
+        print("could not purchase secondary mining laser")
     orbit(shipName)
     navigate(shipName, ASTEROIDS)
     return shipName
@@ -40,3 +45,8 @@ def buyProbe():
                 wp = waypoint, shipName
                 WAYPOINT_PROBES.append(wp)
                 return wp
+
+def installMount(ship, mount):
+    endpoint = "v2/my/ships/" + ship + "/mounts/install"
+    params = {"symbol": mount}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
