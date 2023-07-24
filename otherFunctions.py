@@ -1,4 +1,4 @@
-from main import *
+from buyShip import *
 
 def transfer(send_ship, recieve_ship, item, quantity):
     endpoint = "v2/my/ships/" + send_ship + "/transfer"
@@ -39,7 +39,12 @@ def getMarket(system, waypoint):
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
+def getAgent():
+    endpoint = "v2/my/agent"
+    params = None
+    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+
 
 
 if __name__ == '__main__':
-    print(transfer("EKMON-4", "EKMON-1", ITEM, 22))
+    print(transfer("EKMON-3", "EKMON-1", "MOUNT_MINING_LASER_II", 1))

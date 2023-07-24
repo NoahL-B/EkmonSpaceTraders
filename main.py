@@ -2,24 +2,26 @@ from SpacePyTraders import client
 import time
 import threading
 from datetime import datetime
+import otherFunctions
+import buyShip
 
 USERNAME = "EKMON"
-TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZXJzaW9uIjoidjIiLCJyZXNldF9kYXRlIjoiMjAyMy0wNy0xNSIsImlhdCI6MTY4OTQ0NTA5Mywic3ViIjoiYWdlbnQtdG9rZW4ifQ.TovM6gCtQCVEY3M8m5RVVioTXrYa8RBGDeArPjVMrUI2UD-NYFwvH4QCb9dXFKWUoAFWmjxrF84L1Ctw85omq2jhQSS390SZBstG6DHrqyhT__2XVuO1RLHy1-o-stXF5mSaG6DTROfkoMZMLo_WEpSy9SvHF9Qj5kowOPF_odFf2q433C0gtFKpSPaOO86_bFffRoGKSgkgyds5VlqkJgfVUGhFoawOitDtEBnUUWnlWj7JF9Mefk43kRvA2Cdxncg14BV2HD3qMCDIZ1tIbQPnbJJX4jiPWEc3yIDemSkPTHebKIf1uxy8wkQqJ6Hrmu_7UR1HpnatQ9nbFEBxrg"
+TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZXJzaW9uIjoidjIiLCJyZXNldF9kYXRlIjoiMjAyMy0wNy0yMyIsImlhdCI6MTY5MDEzMDA5Niwic3ViIjoiYWdlbnQtdG9rZW4ifQ.HWG5Sg-TomL9Lg5jnJlb41OQmdgzHyOE4_VdCXFLcrelpeXIkcIsAvSxhmuTFMD6ofUtRN9WUK6qjmNtlFox0wUEQF4VkiSlsgtEEi6ghj_LQb0TWHVedClX4eSwQU-DZJIAzMx4J-hrUCu5urrTSgKxIUQCWVzLbwajyZM2Y-t5Op4_tTnlP5dz9T_-ytFI2rI6Z72MIh2c1f9IwCQCikQs69dGVCC2ZTwIx1BWa8Id_TG5ALgqey2hTrrt5eyUtoeJ9UYy3YjyGJbVpmiDfmdRs56AOt5xvzvaX1uVUp8ZJlMPM5GzlwiSXyS-gxRSuteZZ1NvpvHVC2UFULZcrg"
 
 myClient = client.Client(USERNAME, TOKEN)
 
-MINING_SHIPS = ["EKMON-1", "EKMON-5", "EKMON-6",
-                "EKMON-7", "EKMON-8", "EKMON-9", "EKMON-A", "EKMON-B",
-                "EKMON-C", "EKMON-D", "EKMON-E", "EKMON-F", "EKMON-10",
-                "EKMON-11", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E",
-                "EKMON-1F", "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24",
-                "EKMON-25", "EKMON-26", "EKMON-27", 'EKMON-28', 'EKMON-29', 'EKMON-2A',
-                'EKMON-2B', 'EKMON-2C', 'EKMON-2D', 'EKMON-2E', 'EKMON-2F', 'EKMON-30',
-                'EKMON-31', 'EKMON-32']
+MINING_SHIPS = ["EKMON-1", "EKMON-3", "EKMON-4", "EKMON-5", "EKMON-6", "EKMON-7", "EKMON-8", "EKMON-9"]
 
-# ["EKMON-3", "EKMON-4"]
+# [
+#                 , "EKMON-A", "EKMON-B",
+#                 "EKMON-C", "EKMON-D", "EKMON-E", "EKMON-F", "EKMON-10",
+#                 "EKMON-11", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E",
+#                 "EKMON-1F", "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24",
+#                 "EKMON-25", "EKMON-26", "EKMON-27", 'EKMON-28', 'EKMON-29', 'EKMON-2A',
+#                 'EKMON-2B', 'EKMON-2C', 'EKMON-2D', 'EKMON-2E', 'EKMON-2F', 'EKMON-30',
+#                 'EKMON-31', 'EKMON-32', "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A"]
 
-PROBE_SHIPS = ["EKMON-2", "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A"]
+PROBE_SHIPS = ["EKMON-2"]
 WAYPOINTS = ['X1-JF24-77691C', 'X1-JF24-06790Z', 'X1-JF24-97552X', 'X1-JF24-78153C', 'X1-JF24-01924F', 'X1-JF24-23225F', 'X1-JF24-45556D', 'X1-JF24-73757X', 'X1-JF24-34538X', 'X1-JF24-00189Z']
 
 WAYPOINT_PROBES = [('X1-JF24-73757X', "EKMON-2"),
@@ -34,14 +36,14 @@ WAYPOINT_PROBES = [('X1-JF24-73757X', "EKMON-2"),
                    ('X1-JF24-00189Z', 'EKMON-1A')]
 
 
-SYSTEM = "X1-JF24"
+SYSTEM = "X1-B13"
 SHIP = "EKMON-1"
 
-CONTRACT = "clkbnrophqi88s60cuut63fun"
-ITEM = ['MOUNT_SURVEYOR_I']
+CONTRACT = ""
+ITEM = []
 
-ASTEROIDS = "X1-JF24-23225F"
-DELIVERY = "X1-JF24-73757X"
+ASTEROIDS = "X1-B13-97105A"
+DELIVERY = "X1-B13-96622Z"
 
 
 def extract(ship):
@@ -73,6 +75,7 @@ def sell(ship, saved):
             params = {"symbol": symbol, "units": units}
             sale = myClient.generic_api_call("POST", endpoint, params, TOKEN)
             new_cargo = sale["data"]["cargo"]
+            print(ship + ": " + str(sale))
     return new_cargo
 
 def purchase(ship, item, units):
@@ -113,7 +116,12 @@ def nav_to_time_delay(nav):
 
 def shipLoop(ship):
     orbit(ship)
+    timeSinceLast = datetime.now()
     while True:
+        new_time = datetime.now()
+        diff = new_time - timeSinceLast
+        print(ship, diff)
+        timeSinceLast = new_time
         try:
             fullCargo = False
             collected = None
@@ -133,7 +141,7 @@ def shipLoop(ship):
                 capacity = c["capacity"]
                 collected = c["units"]
                 print(ship + ": " + str(collected) + "/" + str(capacity))
-                if collected/capacity >= 0.67:
+                if collected/capacity >= 0.5:
                     print(ship + ": " + str(refuel(ship)))
                     orbit(ship)
                     nav = navigate(ship, DELIVERY)
@@ -161,6 +169,42 @@ def shipLoop(ship):
 
 
 
+def ore_hound_thread_spawner():
+    new_threads = []
+
+    while True:
+        agent = otherFunctions.getAgent()
+        credits = agent["data"]["credits"]
+        shipyard = buyShip.getShipyard()
+        ships = shipyard["data"]["ships"]
+        ore_hound = None
+        for ship in ships:
+            if ship["type"] == "SHIP_ORE_HOUND":
+                ore_hound = ship
+        ore_hound_price = ore_hound["purchasePrice"]
+        market = otherFunctions.getMarket(SYSTEM, otherFunctions.SHIPYARD)
+        goods = market["data"]["tradeGoods"]
+        mount_price = None
+        for good in goods:
+            if good["symbol"] == "MOUNT_MINING_LASER_II":
+                mount_price = good["purchasePrice"]
+        total_price = ore_hound_price + mount_price + 4000
+        print("***")
+        print("CREDITS:", credits)
+        print("COST:", total_price)
+        print("***")
+        if credits > total_price:
+            new_ship = buyShip.buyOreHound()
+            new_thread = threading.Thread(target=shipLoop, args=(new_ship,), daemon=True)
+            new_threads.append(new_thread)
+            new_thread.start()
+            print("New Ship:", new_ship)
+
+        time.sleep(600)
+
+
+
+
 def main():
     miningDrones = MINING_SHIPS
     threads = []
@@ -169,8 +213,8 @@ def main():
         threads.append(x)
         x.start()
         time.sleep(1.5)
-    for t in threads:
-        t.join()
+
+    ore_hound_thread_spawner()
 
 
 

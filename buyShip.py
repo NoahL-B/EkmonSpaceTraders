@@ -1,6 +1,13 @@
 from main import *
 
-SHIPYARD = "X1-JF24-73757X"
+SHIPYARD = "X1-B13-48027C"
+
+
+def getShipyard():
+    endpoint = "v2/systems/" + SYSTEM + "/waypoints/" + SHIPYARD + "/shipyard"
+    params = None
+    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+
 
 def buyMiningDrone():
     endpoint = "v2/my/ships/"
@@ -50,3 +57,6 @@ def installMount(ship, mount):
     endpoint = "v2/my/ships/" + ship + "/mounts/install"
     params = {"symbol": mount}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+if __name__ == '__main__':
+    buyOreHound()
