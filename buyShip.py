@@ -1,6 +1,6 @@
 from main import *
 
-SHIPYARD = "X1-B13-48027C"
+SHIPYARD = "X1-RJ19-51287F"
 
 
 def getShipyard():
@@ -38,25 +38,33 @@ def buyProbe():
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     orbit(shipName)
-    destination_set = False
-    for waypoint in WAYPOINTS:
-        if not destination_set:
-            ship_present = False
-            for pairing in WAYPOINT_PROBES:
-                w, p = pairing
-                if w == waypoint:
-                    ship_present = True
-            if not ship_present:
-                destination_set = True
-                navigate(shipName, waypoint)
-                wp = waypoint, shipName
-                WAYPOINT_PROBES.append(wp)
-                return wp
+    return shipName
+
 
 def installMount(ship, mount):
     endpoint = "v2/my/ships/" + ship + "/mounts/install"
     params = {"symbol": mount}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+def uninstallMount(ship, mount):
+    endpoint = "v2/my/ships/" + ship + "/mounts/remove"
+    params = {"symbol": mount}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+
+def buyRefiningFreighter():
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_REFINING_FREIGHTER", "waypointSymbol": SHIPYARD}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    uninstallMount(shipName, "MOUNT_TURRET_I")
+    uninstallMount(shipName, "MOUNT_TURRET_I")
+    uninstallMount(shipName, "MOUNT_MISSILE_LAUNCHER_I")
+    purchase(shipName, "MOUNT_SURVEYOR_I", 3)
+    installMount(shipName, "MOUNT_SURVEYOR_I")
+    installMount(shipName, "MOUNT_SURVEYOR_I")
+    installMount(shipName, "MOUNT_SURVEYOR_I")
+    return shipName
+
 if __name__ == '__main__':
-    buyOreHound()
+    print(buyRefiningFreighter())

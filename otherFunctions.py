@@ -44,7 +44,12 @@ def getAgent():
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
+def patchShipNav(ship, flightMode):
+    endpoint = "v2/my/ships/" + ship + "/nav"
+    params = {"flightMode": flightMode}
+    return myClient.generic_api_call("PUT", endpoint, params, TOKEN)
+
 
 
 if __name__ == '__main__':
-    print(transfer("EKMON-3", "EKMON-1", "MOUNT_MINING_LASER_II", 1))
+    patchShipNav("EKMON-1", "CRUISE")
