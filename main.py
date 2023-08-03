@@ -1,9 +1,13 @@
-from SpacePyTraders import client
 import time
 import threading
-from datetime import datetime
+import json
+
 import otherFunctions
 import buyShip
+
+from SpacePyTraders import client
+from datetime import datetime
+
 
 USERNAME = "EKMON"
 TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZXJzaW9uIjoidjIiLCJyZXNldF9kYXRlIjoiMjAyMy0wNy0yOSIsImlhdCI6MTY5MDY0NzM2MSwic3ViIjoiYWdlbnQtdG9rZW4ifQ.W4RYEuGm5xCqo92Efc0QQIEmnudAE1tHv_cLBMZ4R7TIToBQsqR-cPbOcWmvwDFI8WvG3cjQ91JrEK2h-BMj2H7tzfNlZ7Ah88_SrhAjLGbnRnabtQCZGq4R8j2uG4XDiSRlVaotL_Ng-tzkkha4ul-pRLceIQ-NWF1y2yQTf_6E21UsWLrT61LMkvQaj1RH6oJZApaJxx2KxTR2dlkSBvH2UZ0RL59IBPLcpw9hgtWWmdSlw8ZRFMR9GdYeOEfhYYtaXeZWdNXDsC81IScHqBId9B_9QpztmHKqiXepZwTREgELb2Saeqts02WsgN13D9G-GMAVP1iAN-eWmNftdw"
@@ -11,10 +15,9 @@ TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZX
 myClient = client.Client(USERNAME, TOKEN)
 
 MINING_SHIPS = [            #"EKMON-1"    #,              "EKMON-3",
-                 "EKMON-4",  "EKMON-5",  "EKMON-6",  "EKMON-7",  "EKMON-8",  "EKMON-9" #,  "EKMON-A",  "EKMON-B",  "EKMON-C",  "EKMON-D",  "EKMON-E",  "EKMON-F",
-#                "EKMON-10", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E", "EKMON-1F",
-#                "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24", "EKMON-25", "EKMON-26", "EKMON-27", 'EKMON-28', 'EKMON-29', 'EKMON-2A', 'EKMON-2B', 'EKMON-2C', 'EKMON-2D', 'EKMON-2E', 'EKMON-2F',
-#                'EKMON-30', 'EKMON-31', 'EKMON-32', "EKMON-33", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37", 'EKMON-38', 'EKMON-39', 'EKMON-3A', 'EKMON-3B', 'EKMON-3C', 'EKMON-3D', 'EKMON-3E', 'EKMON-3F',
+                                                                "EKMON-4",  "EKMON-5",  "EKMON-6",  "EKMON-7",  "EKMON-8",  "EKMON-9",  "EKMON-A",  "EKMON-B",  "EKMON-C",  "EKMON-D",  "EKMON-E",  "EKMON-F",
+                "EKMON-10", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E", "EKMON-1F",
+                "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24", "EKMON-25", "EKMON-26", "EKMON-27", 'EKMON-28', 'EKMON-29', 'EKMON-2A', 'EKMON-2B', 'EKMON-2C', 'EKMON-2D', 'EKMON-2E', 'EKMON-2F',
 #                            "EKMON-41",                                                                                                                         "EKMON-4C", "EKMON-4D", "EKMON-4E",
 #                            'EKMON-51', 'EKMON-52', "EKMON-53", "EKMON-54", "EKMON-55", "EKMON-56", "EKMON-57", 'EKMON-58', 'EKMON-59', 'EKMON-5A', 'EKMON-5B', 'EKMON-5C', 'EKMON-5D', 'EKMON-5E', 'EKMON-5F',
 #                'EKMON-60', 'EKMON-61', 'EKMON-62', "EKMON-63", "EKMON-64", "EKMON-65", "EKMON-66", "EKMON-67", 'EKMON-68', 'EKMON-69', 'EKMON-6A', 'EKMON-6B', 'EKMON-6C', 'EKMON-6D', 'EKMON-6E', 'EKMON-6F',
@@ -23,11 +26,8 @@ MINING_SHIPS = [            #"EKMON-1"    #,              "EKMON-3",
 #                'EKMON-90', 'EKMON-91', 'EKMON-92', "EKMON-93"
                             ]
 
-
-
-SURVEY_SHIPS = [
-#    "EKMON-40", "EKMON-4B"
-        ]
+SURVEY_SHIPS = ['EKMON-30', 'EKMON-31', 'EKMON-32', "EKMON-33", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37", 'EKMON-38', 'EKMON-39'#, 'EKMON-3A', 'EKMON-3B', 'EKMON-3C', 'EKMON-3D', 'EKMON-3E', 'EKMON-3F'
+                ]
 
 sample_survey = {
     "signature": "X1-RJ19-73095E-B3B61B",
@@ -53,7 +53,7 @@ WAYPOINT_PROBES = []
 SYSTEM = "X1-RJ19"
 SHIP = "EKMON-1"
 
-CONTRACT = ''
+CONTRACT = 'clkv8f6emo7gas60cr7efkeda'
 ITEM = []
 
 ASTEROIDS = "X1-RJ19-73095E"
@@ -64,26 +64,44 @@ def extract(ship, survey=None):
     endpoint = "v2/my/ships/" + ship + "/extract"
     params = None
     if survey is not None:
-        params = {"survey": survey}
+        params = {"survey": json.dumps(survey)}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
+def dumb_extract(ship, survey=None):
+    endpoint = "v2/my/ships/" + ship + "/extract"
+    params = None
+    if survey is not None:
+        params = {
+            "survey.signature": survey["signature"],
+            "survey.symbol": survey["symbol"],
+            "survey.deposits": survey["deposits"],
+            "survey.expiration": survey["expiration"],
+            "survey.size": survey["size"],
+            "survey": survey
+        }
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
 
 def createSurvey(ship):
     endpoint = "v2/my/ships/" + ship + "/survey"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
 
+
 def dock(ship):
     endpoint = "v2/my/ships/" + ship + "/dock"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
+
 
 def orbit(ship):
     endpoint = "v2/my/ships/" + ship + "/orbit"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
 
+
 def cargo(ship):
     endpoint = "v2/my/ships/" + ship + "/cargo"
     return myClient.generic_api_call("GET", endpoint, None, TOKEN)
+
 
 def sell(ship, saved):
     data = cargo(ship)["data"]
@@ -101,6 +119,7 @@ def sell(ship, saved):
             print(ship + ": " + str(sale))
     return new_cargo
 
+
 def purchase(ship, item, units):
     endpoint = "v2/my/ships/" + ship + "/purchase"
     params = {"symbol": item, "units": units}
@@ -108,33 +127,41 @@ def purchase(ship, item, units):
     return p
 
 
-def navigate(ship, location):
+def navigate(ship, location, nav_and_sleep=False):
     endpoint = "v2/my/ships/" + ship + "/navigate"
     params = {"waypointSymbol": location}
-    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    if nav_and_sleep:
+        time.sleep(nav_to_time_delay(to_return))
+    return to_return
+
 
 def jump(ship, system):
     endpoint = "v2/my/ships/" + ship + "/jump"
     params = {"systemSymbol": system}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
+def warp(ship, waypoint):
+    endpoint = "v2/my/ships/" + ship + "/warp"
+    params = {"waypointSymbol": waypoint}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+
 def jumpNav(ship, jump_gate, systems, final_waypoint):
     orbit(ship)
     num_jumps = len(systems)
-    nav = navigate(ship, jump_gate)
-    sleep_time = nav_to_time_delay(nav)
-    time.sleep(sleep_time)
+    navigate(ship, jump_gate, nav_and_sleep=True)
     for i in range(num_jumps):
         jump(ship, systems[i])
-    nav = navigate(ship, final_waypoint)
-    sleep_time = nav_to_time_delay(nav)
-    time.sleep(sleep_time)
-    return
+    return navigate(ship, final_waypoint, nav_and_sleep=True)
+
 
 def deliver(ship, item, quantity, contract):
     endpoint = "v2/my/contracts/" + contract + "/deliver"
     params = {"shipSymbol": ship, "tradeSymbol": item, "units": quantity}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
 
 def refuel(ship):
     endpoint = "v2/my/ships/" + ship + "/refuel"
@@ -154,6 +181,28 @@ def nav_to_time_delay(nav):
         return 60
 
 
+def chart_system(ship, system):
+    from database.System import listWaypointsInSystem
+    waypoints = listWaypointsInSystem(system)
+    jump_gate = None
+    for wp in waypoints["data"]:
+        if wp["type"] == "JUMP_GATE":
+            jump_gate = wp
+        else:
+            for t in wp["traits"]:
+                if t["symbol"] == "UNCHARTED":
+                    navigate(ship, wp["symbol"], nav_and_sleep=True)
+                    chart_wp(ship)
+    if jump_gate is not None:
+        navigate(ship, jump_gate["symbol"], nav_and_sleep=True)
+        for t in jump_gate["traits"]:
+            if t["symbol"] == "UNCHARTED":
+                chart_wp(ship)
+
+
+def chart_wp(ship):
+    endpoint = "v2/my/ships/" + ship + "/chart"
+    return myClient.generic_api_call("POST", endpoint, None, TOKEN)
 
 
 def shipLoop(ship, lock=None, surveys=None):
@@ -179,7 +228,7 @@ def shipLoop(ship, lock=None, surveys=None):
                     if len(surveys) > 0:
                         survey = surveys.pop(0)
                     lock.release()
-                extraction = extract(ship, survey)
+                extraction = dumb_extract(ship, survey)
                 print(ship + ": " + str(extraction))
                 c = extraction["data"]["cargo"]
                 capacity = c["capacity"]
@@ -245,7 +294,6 @@ def haulerLoop(ship,  contract, origin, use_jump_nav=False, jump_nav_gates_to_or
         max_price = total/required
         print("max price per unit", max_price)
 
-
     too_expensive = False
     while required > fulfilled and not too_expensive:
         orbit(ship)
@@ -289,7 +337,6 @@ def haulerLoop(ship,  contract, origin, use_jump_nav=False, jump_nav_gates_to_or
     return not too_expensive
 
 
-
 def ore_hound_thread_spawner(lock=None, surveys=None):
     new_threads = []
 
@@ -316,7 +363,7 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
         print("***")
         if credits > total_price:
             new_ship = buyShip.buyOreHound()
-            new_thread = threading.Thread(target=shipLoop, args=(new_ship,lock,surveys), daemon=True)
+            new_thread = threading.Thread(target=shipLoop, args=(new_ship, lock, surveys), daemon=True)
             new_threads.append(new_thread)
             new_thread.start()
             print("New Ship:", new_ship)
@@ -324,21 +371,71 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
         time.sleep(600)
 
 
-
 def survey_loop(ship, lock: threading.Lock, surveys):
     orbit(ship)
     while True:
-        new_survey = createSurvey(ship)
-        if new_survey is not False:
-            cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
-            survey_list = new_survey["data"]["surveys"]
-            while not lock.acquire():
-                time.sleep(1)
-            surveys.extend(survey_list)
-            lock.release()
-            time.sleep(cooldown)
+        if len(surveys) < len(MINING_SHIPS):
+            new_survey = createSurvey(ship)
+            if new_survey is not False:
+                cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
+                survey_list = new_survey["data"]["surveys"]
+                good_surveys = []
+                for survey in survey_list:
+                    if is_good(survey):
+                        good_surveys.append(survey)
+                if good_surveys:
+                    gs5 = []
+                    for _ in range(5):
+                        gs5.extend(good_surveys)
+                    while not lock.acquire():
+                        time.sleep(1)
+                    surveys.extend(gs5)
+                    print("NUM SURVEYS:", len(surveys))
+                    lock.release()
+                time.sleep(cooldown)
+            else:
+                time.sleep(60)
         else:
-            time.sleep(60)
+            time.sleep(150)
+
+
+last_hundred_survey_values = []
+def is_good(survey):
+    value = survey_value(survey)
+    last_hundred_survey_values.append(value)
+    if len(last_hundred_survey_values) < 100:
+        return True
+    else:
+        last_hundred_survey_values.pop()
+    top_30 = last_hundred_survey_values.copy()
+    top_30.sort(reverse=True)
+    threshold = top_30[30]
+    if value > threshold:
+        return True
+    else:
+        return False
+
+
+material_values = {
+    "ALUMINUM_ORE": 20,
+    "AMMONIA_ICE": 38,
+    "COPPER_ORE": 2,
+    "DIAMONDS": 455,
+    "ICE_WATER": 11,
+    "IRON_ORE": 2,
+    "PRECIOUS_STONES": 2,
+    "QUARTZ_SAND": 18,
+    "SILICON_CRYSTALS": 33
+}
+def survey_value(survey):
+    deposits = survey["deposits"]
+    divisor = len(deposits)
+    value = 0
+    for d in deposits:
+        d_type = d["symbol"]
+        value += material_values[d_type] / divisor
+
+    return value
 
 
 
@@ -353,26 +450,30 @@ def main():
         threads.append(x)
         x.start()
         print("surveyor started!", surveyor)
-        time.sleep(3)
+
+    if len(surveys) < 1:
+        print("Waiting", end="")
+    while len(surveys) < 1:
+        print(".", end="")
+        time.sleep(1)
+    time.sleep(len(SURVEY_SHIPS) + 1)
 
     for drone in miningDrones:
         x = threading.Thread(target=shipLoop, args=(drone, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()
         print("miner started!", drone)
-        time.sleep(3)
-
+    """
     x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys), daemon=True)
     threads.append(x)
     x.start()
+    """
     if __name__ == '__main__':
         while True:
             pass
 
+    return threads
 
 
 if __name__ == '__main__':
     main()
-
-
-

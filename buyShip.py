@@ -1,5 +1,6 @@
 from main import *
 
+
 SHIPYARD = "X1-RJ19-51287F"
 
 
@@ -38,6 +39,10 @@ def buyProbe():
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     orbit(shipName)
+
+    from otherFunctions import patchShipNav
+    patchShipNav(shipName, "BURN")
+
     return shipName
 
 

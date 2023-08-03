@@ -53,6 +53,7 @@ def listSystems(limit=10, page=1):
     data = myClient.generic_api_call("GET", endpoint, params, TOKEN)
     return data
 
+
 def listWaypointsInSystem(systemSymbol, limit=10, page=1):
     endpoint = "v2/systems/" + systemSymbol + "/waypoints"
     params = {"limit": limit, "page": page}
