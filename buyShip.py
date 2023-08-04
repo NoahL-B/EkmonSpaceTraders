@@ -25,10 +25,13 @@ def buyOreHound():
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     try:
-        purchase(shipName, "MOUNT_MINING_LASER_II", 1)
+        uninstallMount(shipName, "MOUNT_SURVEYOR_I")
+        sell(shipName, [])
+        purchase(shipName, "MOUNT_MINING_LASER_II", 2)
+        installMount(shipName, "MOUNT_MINING_LASER_II")
         installMount(shipName, "MOUNT_MINING_LASER_II")
     except TypeError:
-        print("could not purchase secondary mining laser")
+        print("could not purchase secondary/tertiary mining laser")
     orbit(shipName)
     navigate(shipName, ASTEROIDS)
     return shipName

@@ -1,8 +1,9 @@
 from buyShip import *
 
-def transfer(send_ship, recieve_ship, item, quantity):
+
+def transfer(send_ship, receive_ship, item, quantity):
     endpoint = "v2/my/ships/" + send_ship + "/transfer"
-    params = {"shipSymbol": recieve_ship, "tradeSymbol": item, "units": quantity}
+    params = {"shipSymbol": receive_ship, "tradeSymbol": item, "units": quantity}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
 
@@ -17,10 +18,12 @@ def fulfillContract(contract):
     params = None
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
 def negotiateContract(ship):
     endpoint = "v2/my/ships/" + ship + "/negotiate/contract"
     params = None
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
 
 def acceptContract(contract):
     endpoint = "v2/my/contracts/" + contract + "/accept"
@@ -39,16 +42,17 @@ def getMarket(system, waypoint):
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
+
 def getAgent():
     endpoint = "v2/my/agent"
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
+
 def patchShipNav(ship, flightMode):
     endpoint = "v2/my/ships/" + ship + "/nav"
     params = {"flightMode": flightMode}
     return myClient.generic_api_call("PATCH", endpoint, params, TOKEN)
-
 
 
 if __name__ == '__main__':

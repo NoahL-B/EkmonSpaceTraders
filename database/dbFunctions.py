@@ -1,12 +1,17 @@
+import math
+import pyodbc
+import os
 import dijkstar
 
 from database import Waypoint
 from database.System import *
-import math
 from otherFunctions import *
 
-import pyodbc
-conn = pyodbc.connect(r'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=C:\Users\aweso\OneDrive\Desktop\Programming Projects\Fun Projects\EkmonSpaceTraders\SpaceTraders7-29-23.accdb')
+base_path = os.path.abspath(os.getcwd())
+db_path = os.path.join(base_path, "SpaceTradersDatabase.accdb")
+
+driver = 'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + db_path
+conn = pyodbc.connect(driver)
 conn.autocommit = True
 cursor = conn.cursor()
 
@@ -290,5 +295,5 @@ if __name__ == '__main__':
     print(diff)
 
 """
-PathInfo(nodes=['X1-YQ15', 'X1-DV85', 'X1-NM35', 'X1-KR7', 'X1-VM60', 'X1-UM56', 'X1-MG94', 'X1-JT47', 'X1-QD56', 'X1-SS88', 'X1-FZ66', 'X1-AM51', 'X1-JC43', 'X1-XC54', 'X1-BB82', 'X1-CZ83', 'X1-JA13', 'X1-AU64', 'X1-XA9', 'X1-NU89', 'X1-US18', 'X1-UN56', 'X1-GS91', 'X1-JM65', 'X1-QR77', 'X1-NN9', 'X1-DU50', 'X1-RH51', 'X1-GA17', 'X1-ZN96', 'X1-ZX72', 'X1-BV95', 'X1-NM79', 'X1-UX21', 'X1-FV96', 'X1-YV12', 'X1-BB92', 'X1-SG45', 'X1-TD82', 'X1-GZ67'], edges=[5611.424061679887, 1, 1, 2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], costs=[5611.424061679887, 1, 1, 2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], total_cost=13322.244587750982)
+PathInfo(nodes=['X1-VM60', 'X1-UM56', 'X1-MG94', 'X1-JT47', 'X1-QD56', 'X1-SS88', 'X1-FZ66', 'X1-AM51', 'X1-JC43', 'X1-XC54', 'X1-BB82', 'X1-CZ83', 'X1-JA13', 'X1-AU64', 'X1-XA9', 'X1-NU89', 'X1-US18', 'X1-UN56', 'X1-GS91', 'X1-JM65', 'X1-QR77', 'X1-NN9', 'X1-DU50', 'X1-RH51', 'X1-GA17', 'X1-ZN96', 'X1-ZX72', 'X1-BV95', 'X1-NM79', 'X1-UX21', 'X1-FV96', 'X1-YV12', 'X1-BB92', 'X1-SG45', 'X1-TD82', 'X1-GZ67'], edges=[2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], costs=[2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], total_cost=13322.244587750982)
 """

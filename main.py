@@ -6,11 +6,9 @@ import otherFunctions
 import buyShip
 
 from SpacePyTraders import client
-from datetime import datetime
+from datetime import datetime, timedelta
 
-
-USERNAME = "EKMON"
-TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZGVudGlmaWVyIjoiRUtNT04iLCJ2ZXJzaW9uIjoidjIiLCJyZXNldF9kYXRlIjoiMjAyMy0wNy0yOSIsImlhdCI6MTY5MDY0NzM2MSwic3ViIjoiYWdlbnQtdG9rZW4ifQ.W4RYEuGm5xCqo92Efc0QQIEmnudAE1tHv_cLBMZ4R7TIToBQsqR-cPbOcWmvwDFI8WvG3cjQ91JrEK2h-BMj2H7tzfNlZ7Ah88_SrhAjLGbnRnabtQCZGq4R8j2uG4XDiSRlVaotL_Ng-tzkkha4ul-pRLceIQ-NWF1y2yQTf_6E21UsWLrT61LMkvQaj1RH6oJZApaJxx2KxTR2dlkSBvH2UZ0RL59IBPLcpw9hgtWWmdSlw8ZRFMR9GdYeOEfhYYtaXeZWdNXDsC81IScHqBId9B_9QpztmHKqiXepZwTREgELb2Saeqts02WsgN13D9G-GMAVP1iAN-eWmNftdw"
+from SECRETS import UNAME as USERNAME, TOKEN
 
 myClient = client.Client(USERNAME, TOKEN)
 
@@ -136,16 +134,31 @@ def navigate(ship, location, nav_and_sleep=False):
     return to_return
 
 
-def jump(ship, system):
+def jump(ship, system, jump_and_sleep=False):
     endpoint = "v2/my/ships/" + ship + "/jump"
     params = {"systemSymbol": system}
-    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    if jump_and_sleep:
+        time.sleep(60)
+    return to_return
 
 
-def warp(ship, waypoint):
+def warp(ship, waypoint, warp_and_sleep=False, sleep_counter=True):
     endpoint = "v2/my/ships/" + ship + "/warp"
     params = {"waypointSymbol": waypoint}
-    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    if warp_and_sleep:
+        sleep_time = int(nav_to_time_delay(to_return))
+        if sleep_counter:
+            print("Warping to", waypoint, "in", sleep_time, "seconds.")
+            for i in range(sleep_time, 0, -1):
+                time.sleep(1)
+                print("          ", end="\r")
+                print(i, end="\r")
+        else:
+            time.sleep(sleep_time)
+
+    return to_return
 
 
 def jumpNav(ship, jump_gate, systems, final_waypoint):
@@ -170,9 +183,8 @@ def refuel(ship):
 
 def nav_to_time_delay(nav):
     try:
-        start = nav["data"]["nav"]["route"]["departureTime"]
         end = nav["data"]["nav"]["route"]["arrival"]
-        startdt = datetime.strptime(start, '%Y-%m-%dT%H:%M:%S.%fZ')
+        startdt = datetime.utcnow()
         enddt = datetime.strptime(end, '%Y-%m-%dT%H:%M:%S.%fZ')
         diff = enddt - startdt
         sec = diff.total_seconds()
@@ -181,23 +193,81 @@ def nav_to_time_delay(nav):
         return 60
 
 
-def chart_system(ship, system):
+def get_ship(ship):
+    endpoint = "v2/my/ships/" + ship
+    return myClient.generic_api_call("GET", endpoint, None, TOKEN)
+
+
+def sleep_until_arrival(ship, sleep_counter=False):
+    ship_data = get_ship(ship)
+    nav_data = ship_data
+
+    sleep_time = int(nav_to_time_delay(nav_data))
+    if sleep_time <= 0:
+        return
+    if sleep_counter:
+        print("Warping to", nav_data["data"]["nav"]["waypointSymbol"], "in", sleep_time, "seconds.")
+        now = datetime.now()
+        end = now + timedelta(seconds=sleep_time)
+        while now < end:
+            diff = end - now
+            d = diff // timedelta(days=1)
+            h = diff // timedelta(hours=1) % 24
+            m = diff // timedelta(minutes=1) % 60
+            s = diff // timedelta(seconds=1) % 60
+
+            print("                   ", end="\r")
+            print("{d:01d}:{h:02d}:{m:02d}:{s:02d}".format(d=d, h=h, m=m, s=s), end="\r")
+            time.sleep(1)
+            now = datetime.now()
+    else:
+        time.sleep(sleep_time)
+
+
+def chart_system(ship, system, limit_fuel=True):
     from database.System import listWaypointsInSystem
     waypoints = listWaypointsInSystem(system)
     jump_gate = None
+    chart_count = 0
+    speed = ""
     for wp in waypoints["data"]:
         if wp["type"] == "JUMP_GATE":
             jump_gate = wp
         else:
             for t in wp["traits"]:
                 if t["symbol"] == "UNCHARTED":
+                    if limit_fuel:
+                        if speed == "BURN":
+                            s = get_ship(ship)
+                            if s["data"]["fuel"]["current"] < 500:
+                                otherFunctions.patchShipNav(ship, "DRIFT")
+                                speed = "DRIFT"
                     navigate(ship, wp["symbol"], nav_and_sleep=True)
-                    chart_wp(ship)
+                    c = chart_wp(ship)
+                    if c:
+                        for t2 in c["data"]["waypoint"]["traits"]:
+                            if t2["symbol"] == "MARKETPLACE":
+                                mark = otherFunctions.getMarket(wp["systemSymbol"], wp["symbol"])
+                                for good in mark["data"]["tradeGoods"]:
+                                    if good["symbol"] == "FUEL":
+                                        dock(ship)
+                                        refuel(ship)
+                                        orbit(ship)
+                                        otherFunctions.patchShipNav(ship, "BURN")
+
+                    chart_count += 1
     if jump_gate is not None:
+        if limit_fuel:
+            if speed == "BURN":
+                s = get_ship(ship)
+                if s["data"]["fuel"]["current"] < 500:
+                    otherFunctions.patchShipNav(ship, "DRIFT")
         navigate(ship, jump_gate["symbol"], nav_and_sleep=True)
         for t in jump_gate["traits"]:
             if t["symbol"] == "UNCHARTED":
                 chart_wp(ship)
+                chart_count += 1
+    return chart_count
 
 
 def chart_wp(ship):
@@ -355,8 +425,9 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
         mount_price = None
         for good in goods:
             if good["symbol"] == "MOUNT_MINING_LASER_II":
-                mount_price = good["purchasePrice"]
-        total_price = ore_hound_price + mount_price + 4000
+                mount_price = good["purchasePrice"] * 2
+
+        total_price = ore_hound_price + mount_price + 8000
         print("***")
         print("CREDITS:", credits)
         print("COST:", total_price)
@@ -374,7 +445,7 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
 def survey_loop(ship, lock: threading.Lock, surveys):
     orbit(ship)
     while True:
-        if len(surveys) < len(MINING_SHIPS):
+        if len(surveys) < len(MINING_SHIPS)*2:
             new_survey = createSurvey(ship)
             if new_survey is not False:
                 cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
@@ -384,12 +455,20 @@ def survey_loop(ship, lock: threading.Lock, surveys):
                     if is_good(survey):
                         good_surveys.append(survey)
                 if good_surveys:
-                    gs5 = []
-                    for _ in range(5):
-                        gs5.extend(good_surveys)
+                    gsc = []
+                    for s in good_surveys:
+                        if s["size"] == "SMALL":
+                            for _ in range(5):
+                                gsc.append(s)
+                        elif s["size"] == "MODERATE":
+                            for _ in range(10):
+                                gsc.append(s)
+                        elif s["size"] == "LARGE":
+                            for _ in range(20):
+                                gsc.append(s)
                     while not lock.acquire():
                         time.sleep(1)
-                    surveys.extend(gs5)
+                    surveys.extend(gsc)
                     print("NUM SURVEYS:", len(surveys))
                     lock.release()
                 time.sleep(cooldown)
@@ -398,8 +477,18 @@ def survey_loop(ship, lock: threading.Lock, surveys):
         else:
             time.sleep(150)
 
-
-last_hundred_survey_values = []
+material_values = {
+    "ALUMINUM_ORE": 20,
+    "AMMONIA_ICE": 38,
+    "COPPER_ORE": 2,
+    "ICE_WATER": 11,
+    "IRON_ORE": 2,
+    "PRECIOUS_STONES": 2,
+    "QUARTZ_SAND": 18,
+    "SILICON_CRYSTALS": 33
+}
+avg = sum(material_values.values()) / len(material_values)
+last_hundred_survey_values = [avg for _ in range(100)]
 def is_good(survey):
     value = survey_value(survey)
     last_hundred_survey_values.append(value)
@@ -416,17 +505,9 @@ def is_good(survey):
         return False
 
 
-material_values = {
-    "ALUMINUM_ORE": 20,
-    "AMMONIA_ICE": 38,
-    "COPPER_ORE": 2,
-    "DIAMONDS": 455,
-    "ICE_WATER": 11,
-    "IRON_ORE": 2,
-    "PRECIOUS_STONES": 2,
-    "QUARTZ_SAND": 18,
-    "SILICON_CRYSTALS": 33
-}
+
+
+
 def survey_value(survey):
     deposits = survey["deposits"]
     divisor = len(deposits)
@@ -438,12 +519,36 @@ def survey_value(survey):
     return value
 
 
+def update_material_values():
+    global material_values
+    market = otherFunctions.getMarket(SYSTEM, otherFunctions.SHIPYARD)
+    try:
+        trades = market["data"]["tradeGoods"]
+    except KeyError:
+        return False
+    for t in trades:
+        material_values[t["symbol"]] = t["sellPrice"]
+    return True
+
+
+def mat_val_updater(frequency=600):
+    while True:
+        update_material_values()
+        print("Updated Mat Val:", material_values)
+        time.sleep(frequency)
+
 
 def main():
     miningDrones = MINING_SHIPS
     threads = []
     survey_lock = threading.Lock()
     surveys = []
+
+    x = threading.Thread(target=mat_val_updater, daemon=True)
+    threads.append(x)
+    x.start()
+    print("Material Value Updater Started!")
+    time.sleep(1)
 
     for surveyor in SURVEY_SHIPS:
         x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys), daemon=True)
