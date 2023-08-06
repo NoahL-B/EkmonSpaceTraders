@@ -1,7 +1,9 @@
+from SHARED import myClient
+from SECRETS import TOKEN
 from main import *
 
 
-SHIPYARD = "X1-RJ19-51287F"
+SHIPYARD = "X1-F21-71207F"
 
 
 def getShipyard():
@@ -16,8 +18,9 @@ def buyMiningDrone():
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     orbit(shipName)
-    navigate(shipName, ASTEROIDS)
+    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
     return shipName
+
 
 def buyOreHound():
     endpoint = "v2/my/ships/"
@@ -33,8 +36,9 @@ def buyOreHound():
     except TypeError:
         print("could not purchase secondary/tertiary mining laser")
     orbit(shipName)
-    navigate(shipName, ASTEROIDS)
+    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
     return shipName
+
 
 def buyProbe():
     endpoint = "v2/my/ships/"
@@ -54,10 +58,21 @@ def installMount(ship, mount):
     params = {"symbol": mount}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
 def uninstallMount(ship, mount):
     endpoint = "v2/my/ships/" + ship + "/mounts/remove"
     params = {"symbol": mount}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+
+def buyLightHauler():
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_LIGHT_HAULER", "waypointSymbol": SHIPYARD}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
+    return shipName
 
 
 def buyRefiningFreighter():
@@ -74,5 +89,6 @@ def buyRefiningFreighter():
     installMount(shipName, "MOUNT_SURVEYOR_I")
     return shipName
 
+
 if __name__ == '__main__':
-    print(buyRefiningFreighter())
+    pass

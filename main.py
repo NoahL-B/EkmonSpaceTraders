@@ -5,57 +5,78 @@ import json
 import otherFunctions
 import buyShip
 
-from SpacePyTraders import client
 from datetime import datetime, timedelta
 
-from SECRETS import UNAME as USERNAME, TOKEN
-
-myClient = client.Client(USERNAME, TOKEN)
-
-MINING_SHIPS = [            #"EKMON-1"    #,              "EKMON-3",
-                                                                "EKMON-4",  "EKMON-5",  "EKMON-6",  "EKMON-7",  "EKMON-8",  "EKMON-9",  "EKMON-A",  "EKMON-B",  "EKMON-C",  "EKMON-D",  "EKMON-E",  "EKMON-F",
-                "EKMON-10", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-14", "EKMON-15", "EKMON-16", "EKMON-17", "EKMON-18", "EKMON-19", "EKMON-1A", "EKMON-1B", "EKMON-1C", "EKMON-1D", "EKMON-1E", "EKMON-1F",
-                "EKMON-20", "EKMON-21", "EKMON-22", "EKMON-23", "EKMON-24", "EKMON-25", "EKMON-26", "EKMON-27", 'EKMON-28', 'EKMON-29', 'EKMON-2A', 'EKMON-2B', 'EKMON-2C', 'EKMON-2D', 'EKMON-2E', 'EKMON-2F',
-#                            "EKMON-41",                                                                                                                         "EKMON-4C", "EKMON-4D", "EKMON-4E",
-#                            'EKMON-51', 'EKMON-52', "EKMON-53", "EKMON-54", "EKMON-55", "EKMON-56", "EKMON-57", 'EKMON-58', 'EKMON-59', 'EKMON-5A', 'EKMON-5B', 'EKMON-5C', 'EKMON-5D', 'EKMON-5E', 'EKMON-5F',
-#                'EKMON-60', 'EKMON-61', 'EKMON-62', "EKMON-63", "EKMON-64", "EKMON-65", "EKMON-66", "EKMON-67", 'EKMON-68', 'EKMON-69', 'EKMON-6A', 'EKMON-6B', 'EKMON-6C', 'EKMON-6D', 'EKMON-6E', 'EKMON-6F',
-#                'EKMON-70', 'EKMON-71', 'EKMON-72', "EKMON-73", "EKMON-74", "EKMON-75", "EKMON-76", "EKMON-77", 'EKMON-78', 'EKMON-79', 'EKMON-7A', 'EKMON-7B', 'EKMON-7C', 'EKMON-7D', 'EKMON-7E', 'EKMON-7F',
-#                'EKMON-80', 'EKMON-81', 'EKMON-82', "EKMON-83", "EKMON-84", "EKMON-85", "EKMON-86", "EKMON-87", 'EKMON-88', 'EKMON-89', 'EKMON-8A', 'EKMON-8B', 'EKMON-8C', 'EKMON-8D', 'EKMON-8E', 'EKMON-8F',
-#                'EKMON-90', 'EKMON-91', 'EKMON-92', "EKMON-93"
-                            ]
-
-SURVEY_SHIPS = ['EKMON-30', 'EKMON-31', 'EKMON-32', "EKMON-33", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37", 'EKMON-38', 'EKMON-39'#, 'EKMON-3A', 'EKMON-3B', 'EKMON-3C', 'EKMON-3D', 'EKMON-3E', 'EKMON-3F'
-                ]
-
-sample_survey = {
-    "signature": "X1-RJ19-73095E-B3B61B",
-    "symbol": "X1-RJ19-73095E",
-    "deposits":
-    [
-        {"symbol": "PRECIOUS_STONES"},
-        {"symbol": "PRECIOUS_STONES"},
-        {"symbol": "SILICON_CRYSTALS"},
-        {"symbol": "COPPER_ORE"}
-    ],
-    "expiration": "2023-07-29T20:01:08.000Z",
-    "size": "LARGE"
-}
+from SECRETS import TOKEN
+from SHARED import myClient
 
 
-PROBE_SHIPS = ["EKMON-2"]
-
-WAYPOINTS = []
-WAYPOINT_PROBES = []
-
-
-SYSTEM = "X1-RJ19"
-SHIP = "EKMON-1"
-
-CONTRACT = 'clkv8f6emo7gas60cr7efkeda'
+SYSTEM = ""
+CONTRACT = ""
 ITEM = []
-
-ASTEROIDS = "X1-RJ19-73095E"
+ASTEROIDS = ""
+SHIPYARD = ""
 DELIVERY = ""
+
+
+def init_globals():
+    global SYSTEM
+    global CONTRACT
+    global ITEM
+    global ASTEROIDS
+    global SHIPYARD
+    global DELIVERY
+
+    agent = otherFunctions.getAgent()
+    hq = agent["data"]["headquarters"]
+    hql = hq.split("-")
+    SYSTEM = hql[0] + "-" + hql[1]
+
+    active_contracts = get_active_contracts(get_all_contracts(), False, False)
+    if len(active_contracts) > 0:
+        CONTRACT = active_contracts[0]["id"]
+        ITEM.append(active_contracts[0]["terms"]["deliver"][0]["tradeSymbol"])
+        DELIVERY = active_contracts[0]["terms"]["deliver"][0]["tradeSymbol"]
+    else:
+        CONTRACT = ""
+        DELIVERY = ""
+    waypoints_list = otherFunctions.getWaypoints(SYSTEM)["data"]
+    for wp in waypoints_list:
+        if wp["type"] == "ASTEROID_FIELD":
+            ASTEROIDS = wp["symbol"]
+        elif wp["type"] == "ORBITAL_STATION":
+            SHIPYARD = wp["symbol"]
+
+
+def get_all_contracts():
+    endpoint = "v2/my/contracts"
+    params = {
+        "limit": 20,
+        "page": 1
+    }
+    page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    num_ships = page["meta"]["total"]
+    all_contracts = page["data"]
+
+    while num_ships > len(all_contracts):
+        params["page"] += 1
+        page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+        all_contracts.extend(page["data"])
+    return all_contracts
+
+
+def get_active_contracts(all_contracts, accept_unaccepted=False, include_unaccepted=True):
+    active_contracts = []
+    for c in all_contracts:
+        if not c["fulfilled"]:
+            if c["accepted"]:
+                active_contracts.append(c)
+            elif accept_unaccepted:
+                otherFunctions.acceptContract(c["id"])
+                active_contracts.append(c)
+            elif include_unaccepted:
+                active_contracts.append(c)
+    return active_contracts
 
 
 def extract(ship, survey=None):
@@ -101,7 +122,9 @@ def cargo(ship):
     return myClient.generic_api_call("GET", endpoint, None, TOKEN)
 
 
-def sell(ship, saved):
+def sell(ship, saved=None):
+    if saved is None:
+        saved = list()
     data = cargo(ship)["data"]
     inv = data["inventory"]
     new_cargo = None
@@ -116,6 +139,12 @@ def sell(ship, saved):
             new_cargo = sale["data"]["cargo"]
             print(ship + ": " + str(sale))
     return new_cargo
+
+
+def sell2(ship, item, quantity):
+    endpoint = "v2/my/ships/" + ship + "/sell"
+    params = {"symbol": item, "units": quantity}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
 
 def purchase(ship, item, units):
@@ -139,7 +168,8 @@ def jump(ship, system, jump_and_sleep=False):
     params = {"systemSymbol": system}
     to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     if jump_and_sleep:
-        time.sleep(60)
+        sleep_time = to_return["data"]["cooldown"]["totalSeconds"]
+        time.sleep(sleep_time)
     return to_return
 
 
@@ -184,9 +214,9 @@ def refuel(ship):
 def nav_to_time_delay(nav):
     try:
         end = nav["data"]["nav"]["route"]["arrival"]
-        startdt = datetime.utcnow()
-        enddt = datetime.strptime(end, '%Y-%m-%dT%H:%M:%S.%fZ')
-        diff = enddt - startdt
+        start_dt = datetime.utcnow()
+        end_dt = datetime.strptime(end, '%Y-%m-%dT%H:%M:%S.%fZ')
+        diff = end_dt - start_dt
         sec = diff.total_seconds()
         return sec
     except TypeError:
@@ -204,7 +234,7 @@ def sleep_until_arrival(ship, sleep_counter=False):
 
     sleep_time = int(nav_to_time_delay(nav_data))
     if sleep_time <= 0:
-        return
+        return ship_data
     if sleep_counter:
         print("Warping to", nav_data["data"]["nav"]["waypointSymbol"], "in", sleep_time, "seconds.")
         now = datetime.now()
@@ -222,6 +252,7 @@ def sleep_until_arrival(ship, sleep_counter=False):
             now = datetime.now()
     else:
         time.sleep(sleep_time)
+    return ship_data
 
 
 def chart_system(ship, system, limit_fuel=True):
@@ -311,15 +342,16 @@ def shipLoop(ship, lock=None, surveys=None):
                 capacity = c["capacity"]
                 collected = c["units"]
                 print(ship + ": " + str(collected) + "/" + str(capacity))
-                if collected/capacity >= 0.5:
+                if collected / capacity >= 0.5:
                     print(ship + ": " + str(refuel(ship)))
                     orbit(ship)
                     nav = navigate(ship, DELIVERY)
                     print(ship + ": " + "En route to delivery")
                     time.sleep(nav_to_time_delay(nav) + 1)
                     dock(ship)
-                    delivery = deliver(ship, ITEM, collected, CONTRACT)
-                    if delivery["data"]["contract"]["terms"]["deliver"][0]["unitsRequired"] == delivery["data"]["contract"]["terms"]["deliver"][0]["unitsFulfilled"]:
+                    delivery = deliver(ship, ITEM[0], collected, CONTRACT)
+                    if delivery["data"]["contract"]["terms"]["deliver"][0]["unitsRequired"] == \
+                            delivery["data"]["contract"]["terms"]["deliver"][0]["unitsFulfilled"]:
                         ITEM.pop()
                         otherFunctions.fulfillContract(CONTRACT)
                     print(ship + ": " + str(delivery))
@@ -342,8 +374,10 @@ def shipLoop(ship, lock=None, surveys=None):
             time.sleep(60)
 
 
-def haulerLoop(ship,  contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None, jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None, jump_nav_systems_to_destination=None, item=None, destination=None, required=None, fulfilled=None, max_price=None):
-
+def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None,
+               jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None,
+               jump_nav_systems_to_destination=None, item=None, destination=None, required=None, fulfilled=None,
+               max_price=None):
     c = otherFunctions.getContract(contract)
     if required is None:
         required = c["data"]["terms"]["deliver"][0]["unitsRequired"]
@@ -361,7 +395,7 @@ def haulerLoop(ship,  contract, origin, use_jump_nav=False, jump_nav_gates_to_or
         start_credits = c["data"]["terms"]["payment"]["onAccepted"]
         end_credits = c["data"]["terms"]["payment"]["onFulfilled"]
         total = start_credits + end_credits
-        max_price = total/required
+        max_price = total / required
         print("max price per unit", max_price)
 
     too_expensive = False
@@ -407,10 +441,53 @@ def haulerLoop(ship,  contract, origin, use_jump_nav=False, jump_nav_gates_to_or
     return not too_expensive
 
 
-def ore_hound_thread_spawner(lock=None, surveys=None):
+def get_all_ships():
+    endpoint = "v2/my/ships/"
+    params = {
+        "limit": 20,
+        "page": 1
+    }
+    page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    num_ships = page["meta"]["total"]
+    all_ships = page["data"]
+
+    while num_ships > len(all_ships):
+        params["page"] += 1
+        page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+        all_ships.extend(page["data"])
+    return all_ships
+
+
+def get_ships_by_role(all_ships, role):
+    role_ships = []
+    for ship in all_ships:
+        if ship["registration"]["role"] == role:
+            role_ships.append(ship)
+    return role_ships
+
+
+def get_ships_by_frame(all_ships, frame):
+    frame_ships = []
+    for ship in all_ships:
+        if ship["frame"]["symbol"] == frame:
+            frame_ships.append(ship)
+    return frame_ships
+
+def ships_to_names(ships):
+    names = []
+    for ship in ships:
+        names.append(ship["symbol"])
+    return names
+
+
+def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30):
     new_threads = []
 
-    while True:
+    all_ships = get_all_ships()
+    all_hounds = get_ships_by_frame(all_ships, "FRAME_MINER")
+    num_hounds = len(all_hounds)
+
+    while num_hounds < max_hounds:
         agent = otherFunctions.getAgent()
         credits = agent["data"]["credits"]
         shipyard = buyShip.getShipyard()
@@ -420,7 +497,7 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
             if ship["type"] == "SHIP_ORE_HOUND":
                 ore_hound = ship
         ore_hound_price = ore_hound["purchasePrice"]
-        market = otherFunctions.getMarket(SYSTEM, otherFunctions.SHIPYARD)
+        market = otherFunctions.getMarket(SYSTEM, SHIPYARD)
         goods = market["data"]["tradeGoods"]
         mount_price = None
         for good in goods:
@@ -445,7 +522,7 @@ def ore_hound_thread_spawner(lock=None, surveys=None):
 def survey_loop(ship, lock: threading.Lock, surveys):
     orbit(ship)
     while True:
-        if len(surveys) < len(MINING_SHIPS)*2:
+        if len(surveys) < 50:
             new_survey = createSurvey(ship)
             if new_survey is not False:
                 cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
@@ -477,6 +554,7 @@ def survey_loop(ship, lock: threading.Lock, surveys):
         else:
             time.sleep(150)
 
+
 material_values = {
     "ALUMINUM_ORE": 20,
     "AMMONIA_ICE": 38,
@@ -489,7 +567,10 @@ material_values = {
 }
 avg = sum(material_values.values()) / len(material_values)
 last_hundred_survey_values = [avg for _ in range(100)]
+
+
 def is_good(survey):
+    global last_hundred_survey_values
     value = survey_value(survey)
     last_hundred_survey_values.append(value)
     if len(last_hundred_survey_values) < 100:
@@ -505,9 +586,6 @@ def is_good(survey):
         return False
 
 
-
-
-
 def survey_value(survey):
     deposits = survey["deposits"]
     divisor = len(deposits)
@@ -521,7 +599,7 @@ def survey_value(survey):
 
 def update_material_values():
     global material_values
-    market = otherFunctions.getMarket(SYSTEM, otherFunctions.SHIPYARD)
+    market = otherFunctions.getMarket(SYSTEM, ASTEROIDS)
     try:
         trades = market["data"]["tradeGoods"]
     except KeyError:
@@ -538,8 +616,65 @@ def mat_val_updater(frequency=600):
         time.sleep(frequency)
 
 
+def jettison(ship):
+    data = cargo(ship)["data"]
+    inv = data["inventory"]
+    new_cargo = None
+    for item in inv:
+        symbol = item["symbol"]
+        units = item["units"]
+        endpoint = "v2/my/ships/" + ship + "/jettison"
+        params = {"symbol": symbol, "units": units}
+        jet = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+        new_cargo = jet["data"]["cargo"]
+    return new_cargo
+
+
+def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margin=1.1):
+    ship_data = sleep_until_arrival(ship)
+    if len(ship_data["data"]["cargo"]["inventory"]) > 0:
+        if ship_data["data"]["nav"]["status"] != "DOCKED":
+            dock(ship)
+        try:
+            sell(ship)
+        except KeyError:
+            jettison(ship)
+        orbit(ship)
+    elif ship_data["data"]["nav"]["status"] == "DOCKED":
+        orbit(ship)
+    if ship_data["data"]["nav"]["waypointSymbol"] != purchase_waypoint:
+        navigate(ship, purchase_waypoint, True)
+    dock(ship)
+
+    capacity = ship_data["data"]["cargo"]["capacity"]
+    profitable = True
+    p = None
+    while profitable:
+        num_purchased = 0
+        while num_purchased < capacity:
+            next_purchase_volume = min(trade_volume, capacity - num_purchased)
+            p = purchase(ship, item, next_purchase_volume)
+            num_purchased += next_purchase_volume
+        investment = p["data"]["transaction"]["pricePerUnit"] * capacity
+        orbit(ship)
+        navigate(ship, sell_waypoint, True)
+        dock(ship)
+        s = sell2(ship, item, capacity)
+        refuel(ship)
+        gross = s["data"]["transaction"]["pricePerUnit"]
+        orbit(ship)
+        navigate(ship, purchase_waypoint, True)
+        dock(ship)
+        if investment * margin < gross:
+            profitable = False
+
+
 def main():
-    miningDrones = MINING_SHIPS
+    all_ships = get_all_ships()
+    miningDrones = ["EKMON-1"]
+    miningDrones.extend(ships_to_names(get_ships_by_frame(all_ships, "FRAME_MINER")))
+    survey_ships = ships_to_names(get_ships_by_frame(all_ships, "FRAME_REFINING_FREIGHTER"))
+
     threads = []
     survey_lock = threading.Lock()
     surveys = []
@@ -550,35 +685,37 @@ def main():
     print("Material Value Updater Started!")
     time.sleep(1)
 
-    for surveyor in SURVEY_SHIPS:
+    for surveyor in survey_ships:
         x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()
         print("surveyor started!", surveyor)
 
-    if len(surveys) < 1:
+    if len(surveys) < 1 and len(survey_ships) > 0:
         print("Waiting", end="")
-    while len(surveys) < 1:
+    while len(surveys) < 1 and len(survey_ships) > 0:
         print(".", end="")
         time.sleep(1)
-    time.sleep(len(SURVEY_SHIPS) + 1)
+    time.sleep(len(survey_ships) + 1)
 
     for drone in miningDrones:
         x = threading.Thread(target=shipLoop, args=(drone, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()
         print("miner started!", drone)
-    """
+
     x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys), daemon=True)
     threads.append(x)
     x.start()
-    """
+
     if __name__ == '__main__':
         while True:
             pass
 
     return threads
 
+
+init_globals()
 
 if __name__ == '__main__':
     main()

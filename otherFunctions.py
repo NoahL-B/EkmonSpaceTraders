@@ -1,4 +1,5 @@
-from buyShip import *
+from SHARED import myClient
+from SECRETS import TOKEN
 
 
 def transfer(send_ship, receive_ship, item, quantity):

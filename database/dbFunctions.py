@@ -1,7 +1,7 @@
 import math
 import pyodbc
 import os
-import dijkstar
+import threading
 
 from database import Waypoint
 from database.System import *
@@ -15,6 +15,16 @@ conn = pyodbc.connect(driver)
 conn.autocommit = True
 cursor = conn.cursor()
 
+
+def cursor_closer():
+    try:
+        while True:
+            time.sleep(1)
+    except:
+        cursor.close()
+
+
+threading.Thread(target=cursor_closer)
 
 def sector_to_sql(sector):
     cmd = 'INSERT INTO System (symbol, sectorSymbol, type, x, y) VALUES '
@@ -182,6 +192,12 @@ def get_all_systems():
     return all_systems
 
 
+def get_systems_dot_json():
+    endpoint = "v2/systems.json"
+    params = None
+    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+
+
 def get_all_waypoints_in_system(systemSymbol):
     system_waypoints = []
 
@@ -222,6 +238,12 @@ def populate_waypoints(all_systems):
     for wp in all_waypoints:
         wp_obj = Waypoint.Waypoint(wp)
         cmd = waypoint_to_sql(wp_obj)
+        cursor.execute(cmd)
+
+
+def populate_systems(all_systems):
+    for s in all_systems:
+        cmd = sector_to_sql(s)
         cursor.execute(cmd)
 
 
@@ -294,6 +316,3 @@ if __name__ == '__main__':
     diff = start - end
     print(diff)
 
-"""
-PathInfo(nodes=['X1-VM60', 'X1-UM56', 'X1-MG94', 'X1-JT47', 'X1-QD56', 'X1-SS88', 'X1-FZ66', 'X1-AM51', 'X1-JC43', 'X1-XC54', 'X1-BB82', 'X1-CZ83', 'X1-JA13', 'X1-AU64', 'X1-XA9', 'X1-NU89', 'X1-US18', 'X1-UN56', 'X1-GS91', 'X1-JM65', 'X1-QR77', 'X1-NN9', 'X1-DU50', 'X1-RH51', 'X1-GA17', 'X1-ZN96', 'X1-ZX72', 'X1-BV95', 'X1-NM79', 'X1-UX21', 'X1-FV96', 'X1-YV12', 'X1-BB92', 'X1-SG45', 'X1-TD82', 'X1-GZ67'], edges=[2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], costs=[2002.0029970007538, 1, 1, 1, 1, 2371.6334033741387, 1, 1, 1, 1, 3302.1841256962034, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], total_cost=13322.244587750982)
-"""
