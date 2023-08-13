@@ -1,30 +1,11 @@
+import datetime
 import math
-import pyodbc
-import os
-import threading
 
 from database import Waypoint
 from database.System import *
 from otherFunctions import *
+from SHARED import *
 
-base_path = os.path.abspath(os.getcwd())
-db_path = os.path.join(base_path, "SpaceTradersDatabase.accdb")
-
-driver = 'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + db_path
-conn = pyodbc.connect(driver)
-conn.autocommit = True
-cursor = conn.cursor()
-
-
-def cursor_closer():
-    try:
-        while True:
-            time.sleep(1)
-    except:
-        cursor.close()
-
-
-threading.Thread(target=cursor_closer)
 
 def sector_to_sql(sector):
     cmd = 'INSERT INTO System (symbol, sectorSymbol, type, x, y) VALUES '
@@ -32,7 +13,10 @@ def sector_to_sql(sector):
     return cmd
 
 
-def waypoint_to_sql(wp):
+def waypoint_to_sql(wp, update_not_insert=False):
+    if update_not_insert:
+        return waypoint_to_sql_2(wp)
+
     cmd = 'INSERT INTO Waypoint (symbol, type, systemSymbol, x, y'
 
     if wp.faction is not None:
@@ -54,6 +38,29 @@ def waypoint_to_sql(wp):
     cmd += ");"
     return cmd
 
+
+UNCHARTED_TRAIT_DICT = {
+        "symbol": "UNCHARTED",
+        "name": "Uncharted",
+        "description": "An unexplored region of space, full of potential discoveries and hidden dangers."
+      }
+
+def waypoint_to_sql_2(wp):
+    if UNCHARTED_TRAIT_DICT in wp.traits:
+        return False
+
+    cmd = 'UPDATE Waypoint SET Waypoint.UNCHARTED=False'
+
+    if wp.faction is not None:
+        cmd += ", Waypoint.faction='" + wp.faction["symbol"] + "'"
+
+    for t in wp.traits:
+        trait_symbol = t["symbol"]
+        cmd += ", Waypoint." + trait_symbol + "=True"
+
+    cmd += " WHERE (Waypoint.symbol='" + wp.symbol + "');"
+
+    return cmd
 
 def distance(system_1, system_2):
     x1 = system_1["x"]
@@ -223,6 +230,14 @@ def get_all_waypoints(all_systems):
                 print(len(all_waypoints))
     return all_waypoints
 
+def get_all_waypoints_generator(all_systems):
+    notable_systems = get_notable_systems(all_systems)
+    for s in notable_systems:
+        systemSymbol = s["symbol"]
+        system_waypoints = get_all_waypoints_in_system(systemSymbol)
+        for wp in system_waypoints:
+            yield wp
+
 
 def get_notable_systems(all_systems):
     # a notable system is a system that contains a non-zero number of waypoints
@@ -234,11 +249,23 @@ def get_notable_systems(all_systems):
 
 
 def populate_waypoints(all_systems):
-    all_waypoints = get_all_waypoints(all_systems)
-    for wp in all_waypoints:
+    access_waypoints = get_waypoints_from_access()
+    access_waypoint_symbols = []
+    for awp in access_waypoints:
+        access_waypoint_symbols.append(awp["symbol"])
+
+    counter = 0
+
+    for wp in get_all_waypoints_generator(all_systems):
         wp_obj = Waypoint.Waypoint(wp)
-        cmd = waypoint_to_sql(wp_obj)
-        cursor.execute(cmd)
+        needs_update = False
+        if wp["symbol"] in access_waypoint_symbols:
+            needs_update = True
+        cmd = waypoint_to_sql(wp_obj, needs_update)
+        if cmd:
+            cursor.execute(cmd)
+        counter += 1
+        print("\r", counter, wp["symbol"], end="")
 
 
 def populate_systems(all_systems):
@@ -253,7 +280,7 @@ def get_systems_from_access():
     for row in cursor:
         raw_systems.append(row)
 
-    complete_systems = []
+    sys_dicts_by_name = {}
 
     for raw_sys in raw_systems:
         complete_system = {
@@ -265,26 +292,30 @@ def get_systems_from_access():
             "waypoints": [],
             "factions": []
         }
-        cmd = 'SELECT symbol, type, x, y, faction FROM Waypoint WHERE systemSymbol=?;'
-        cursor.execute(cmd, (raw_sys[0],))
-        for raw_wp in cursor:
-            dict_wp = {
-                "symbol": raw_wp[0],
-                "type": raw_wp[1],
-                "x": raw_wp[2],
-                "y": raw_wp[3]
-            }
-            faction = raw_wp[4]
-            if faction is not None and faction != "":
-                already_listed = False
-                for already_listed_faction in complete_system["factions"]:
-                    if already_listed_faction["symbol"] == faction:
-                        already_listed = True
-                if not already_listed:
-                    complete_system["factions"].append({"symbol": faction})
-            complete_system["waypoints"].append(dict_wp)
-        complete_systems.append(complete_system)
-    return complete_systems
+        sys_dicts_by_name[raw_sys[0]] = complete_system
+
+    all_waypoints = get_waypoints_from_access()
+
+    for full_wp in all_waypoints:
+        sys_wp = {
+            "symbol": full_wp["symbol"],
+            "type": full_wp["type"],
+            "x": full_wp["x"],
+            "y": full_wp["y"]
+        }
+        faction = None
+        if "faction" in full_wp.keys():
+            faction = {"symbol": full_wp["faction"]}
+        active_system = sys_dicts_by_name[full_wp["systemSymbol"]]
+        active_system["waypoints"].append(sys_wp)
+        if faction is not None:
+            if faction not in active_system["factions"]:
+                active_system["factions"].append(faction)
+
+    sys_list = []
+    for sys in sys_dicts_by_name.values():
+        sys_list.append(sys)
+    return sys_list
 
 
 def get_waypoints_from_access():
@@ -300,6 +331,10 @@ def get_waypoints_from_access():
             "y": raw_wp[4],
             "traits": traits
         }
+        faction = raw_wp[5]
+        if faction is not None and faction != "":
+            dict_wp["faction"] = faction
+
         for trait_num in range(6, 65):
             if raw_wp[trait_num]:
                 trait_name = raw_wp.cursor_description[trait_num][0]
@@ -308,11 +343,89 @@ def get_waypoints_from_access():
     return waypoints
 
 
+def access_insert_entry(table_name, column_name_list, value_list):
+    cmd = "INSERT INTO " + table_name + "(" + column_name_list[0]
+    for col_name in column_name_list[1:]:
+        cmd += ", " + col_name
+    cmd += ") VALUES ('" + str(value_list[0])
+    for value in value_list[1:]:
+        cmd += "', '" + str(value)
+    cmd += "');"
+    cursor.execute(cmd)
+
+
+def access_update_entry(table_name, update_column_name_list, update_value_list, where_column_name_list, where_value_list):
+    cmd = "UPDATE " + table_name + " SET " + table_name + "." + update_column_name_list[0] + ' = ?'
+    for i in range(1, len(update_column_name_list)):
+        cmd += ", " + table_name + "." + update_column_name_list[i] + ' = ?'
+    cmd += " WHERE (((" + table_name + "." + where_column_name_list[0] + ')=?)'
+    for i in range(1, len(where_column_name_list)):
+        cmd += " AND ((" + table_name + "." + where_column_name_list[i] + ')=?)'
+    cmd += ");"
+    params = tuple(update_value_list + where_value_list)
+
+    cursor.execute(cmd, params)
+
+
+def access_get_market(waypoint):
+    cmd = "SELECT * FROM Markets WHERE Waypoint=?"
+    cursor.execute(cmd, (waypoint,))
+    market_vals = []
+    for m in cursor:
+        good_dict = {
+            "waypoint": m[1],
+            "symbol": m[2],
+            "tradeVolume": m[3],
+            "supply": m[4],
+            "purchasePrice": m[5],
+            "sellPrice": m[6],
+            "timeStamp": m[7]
+        }
+        market_vals.append(good_dict)
+
+    return market_vals
+
+
+def access_record_market(market_dict):
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    waypoint = market_dict["data"]["symbol"]
+    if "tradeGoods" in market_dict["data"].keys():
+        trade_goods = market_dict["data"]["tradeGoods"]
+
+        existing_market = access_get_market(waypoint)
+
+        for trade_good in trade_goods:
+            entry_present = False
+            for good in existing_market:
+                if trade_good["symbol"] == good["symbol"]:
+                    entry_present = True
+
+            if entry_present:
+                access_update_entry("Markets", ["TradeVolume", "Supply", "PurchasePrice", "SellPrice", "timestamp"], [trade_good["tradeVolume"], trade_good["supply"], trade_good["purchasePrice"], trade_good["sellPrice"], current_time], ["Waypoint", "Symbol"], [waypoint, trade_good["symbol"]])
+            else:
+                access_insert_entry("Markets", ["Waypoint", "Symbol", "TradeVolume", "Supply", "PurchasePrice", "SellPrice"], [waypoint, trade_good["symbol"], trade_good["tradeVolume"], trade_good["supply"], trade_good["purchasePrice"], trade_good["sellPrice"]])
+                access_update_entry("Markets", ["timestamp"], [current_time], ["Waypoint", "Symbol"], [waypoint, trade_good["symbol"]])
+    else:
+        access_record_low_info_market(market_dict)
+
+
+def access_record_low_info_market(market_dict):
+    waypoint = market_dict["data"]["symbol"]
+    trade_goods = market_dict["data"]["exports"] + market_dict["data"]["imports"] + market_dict["data"]["exchange"]
+
+    existing_market = access_get_market(waypoint)
+
+    for trade_good in trade_goods:
+        entry_present = False
+        for good in existing_market:
+            if trade_good["symbol"] == good["symbol"]:
+                entry_present = True
+
+        if not entry_present:
+            access_insert_entry("Markets", ["Waypoint", "Symbol"], [waypoint, trade_good["symbol"]])
+
+
 if __name__ == '__main__':
-    import time
-    start = time.time()
-    get_all_systems()
-    end = time.time()
-    diff = start - end
-    print(diff)
+    all_systems = get_systems_from_access()
+    populate_waypoints(all_systems)
 

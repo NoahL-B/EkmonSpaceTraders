@@ -1,9 +1,6 @@
 from SHARED import myClient
 from SECRETS import TOKEN
-from main import *
-
-
-SHIPYARD = "X1-F21-71207F"
+from main import SYSTEM, SHIPYARD, ASTEROIDS, orbit, navigate, purchase, sell_all
 
 
 def getShipyard():
@@ -29,12 +26,30 @@ def buyOreHound():
     shipName = purchasedShip["data"]["ship"]["symbol"]
     try:
         uninstallMount(shipName, "MOUNT_SURVEYOR_I")
-        sell(shipName, [])
+        sell_all(shipName, [])
         purchase(shipName, "MOUNT_MINING_LASER_II", 2)
         installMount(shipName, "MOUNT_MINING_LASER_II")
         installMount(shipName, "MOUNT_MINING_LASER_II")
     except TypeError:
         print("could not purchase secondary/tertiary mining laser")
+    orbit(shipName)
+    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
+    return shipName
+
+
+def buySurveyHound():
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": SHIPYARD}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    try:
+        uninstallMount(shipName, "MOUNT_MINING_LASER_II")
+        sell_all(shipName, [])
+        purchase(shipName, "MOUNT_SURVEYOR_I", 2)
+        installMount(shipName, "MOUNT_SURVEYOR_I")
+        installMount(shipName, "MOUNT_SURVEYOR_I")
+    except TypeError:
+        print("could not purchase secondary/tertiary surveyor")
     orbit(shipName)
     navigate(shipName, ASTEROIDS, nav_and_sleep=True)
     return shipName

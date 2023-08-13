@@ -39,9 +39,13 @@ def getWaypoints(system):
 
 
 def getMarket(system, waypoint):
+    from database.dbFunctions import access_record_market
+
     endpoint = "v2/systems/" + system + "/waypoints/" + waypoint + "/market"
     params = None
-    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    market_obj = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    access_record_market(market_obj)
+    return market_obj
 
 
 def getAgent():

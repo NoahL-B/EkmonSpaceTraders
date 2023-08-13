@@ -3,7 +3,7 @@ import os
 
 UNAME = "EKMON"
 
-base_path = os.path.abspath(os.getcwd())
+base_path = os.path.dirname(__file__)
 db_path = os.path.join(base_path, "SpaceTradersDatabase.accdb")
 
 driver = 'Driver={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + db_path

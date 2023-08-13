@@ -2,7 +2,7 @@ import datetime as dt
 import os
 import shutil
 
-from database.dbFunctions import conn
+from SHARED import cursor
 from SpacePyTraders import client
 
 myClient = client.Client("", "")
@@ -42,9 +42,9 @@ def copy_old_data():
 
 
 def clear_db():
-    for table_name in ["ID", "System", "Waypoint"]:
+    for table_name in ["ID", "System", "Waypoint", "Markets"]:
         cmd = "DELETE FROM {};".format(table_name) # noqa
-        conn.execute(cmd)
+        cursor.execute(cmd)
 
 
 def new_secrets():
@@ -62,7 +62,7 @@ def new_secrets():
     token = response["data"]["token"]
 
     cmd = "INSERT INTO ID (UNAME, TOKEN) VALUES ('{}', '{}')".format(TARGET_UNAME, token) # noqa
-    conn.execute(cmd)
+    cursor.execute(cmd)
 
     return response
 

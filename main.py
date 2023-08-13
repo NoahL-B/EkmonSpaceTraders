@@ -1,9 +1,9 @@
+import math
 import time
 import threading
 import json
 
 import otherFunctions
-import buyShip
 
 from datetime import datetime, timedelta
 
@@ -36,7 +36,7 @@ def init_globals():
     if len(active_contracts) > 0:
         CONTRACT = active_contracts[0]["id"]
         ITEM.append(active_contracts[0]["terms"]["deliver"][0]["tradeSymbol"])
-        DELIVERY = active_contracts[0]["terms"]["deliver"][0]["tradeSymbol"]
+        DELIVERY = active_contracts[0]["terms"]["deliver"][0]["destinationSymbol"]
     else:
         CONTRACT = ""
         DELIVERY = ""
@@ -122,7 +122,7 @@ def cargo(ship):
     return myClient.generic_api_call("GET", endpoint, None, TOKEN)
 
 
-def sell(ship, saved=None):
+def sell_all(ship, saved=None):
     if saved is None:
         saved = list()
     data = cargo(ship)["data"]
@@ -138,10 +138,12 @@ def sell(ship, saved=None):
             sale = myClient.generic_api_call("POST", endpoint, params, TOKEN)
             new_cargo = sale["data"]["cargo"]
             print(ship + ": " + str(sale))
+    if new_cargo is None:
+        new_cargo = cargo(ship)["data"]
     return new_cargo
 
 
-def sell2(ship, item, quantity):
+def sell(ship, item, quantity):
     endpoint = "v2/my/ships/" + ship + "/sell"
     params = {"symbol": item, "units": quantity}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
@@ -189,6 +191,47 @@ def warp(ship, waypoint, warp_and_sleep=False, sleep_counter=True):
             time.sleep(sleep_time)
 
     return to_return
+
+
+def travel(ship, destination_waypoint, all_systems=None, sys_graph=None, limit_fuel=True, chart_while_traveling=False):
+    #TODO: finish writing this function
+    ship_obj = sleep_until_arrival(ship)
+    fuel = ship_obj["data"]["fuel"]["current"]
+    current_waypoint = ship_obj["data"]["nav"]["waypointSymbol"]
+    current_system = ship_obj["data"]["nav"]["systemSymbol"]
+    deconstructed_destination = destination_waypoint.split("-")
+    destination_system = deconstructed_destination[0] + "-" + deconstructed_destination[1]
+
+    if destination_system != current_system:
+        pass
+        #get graph, plot route
+        # if first is jump not warp, navigate to jump gate
+        # if any is warp, target a jump gate when applicable
+        # after jump/warp, if chart_while_travelling, chart system
+        # if waypoint is not the jump gate, navigate to jump gate
+
+    else:
+        if current_waypoint == destination_waypoint:
+            return
+        else:
+            navigate(ship, destination_waypoint, True)
+            return
+
+    # note to future: need to tell route plotter to ignore empty systems
+    return
+
+
+def max_speed(fuel, x1, y1, x2, y2):
+    distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
+
+    if fuel >= 2 * distance:
+        return "BURN"
+    elif fuel >= distance:
+        return "CRUISE"
+    elif fuel >= 1:
+        return "DRIFT"
+    else:
+        return None
 
 
 def jumpNav(ship, jump_gate, systems, final_waypoint):
@@ -257,10 +300,12 @@ def sleep_until_arrival(ship, sleep_counter=False):
 
 def chart_system(ship, system, limit_fuel=True):
     from database.System import listWaypointsInSystem
-    waypoints = listWaypointsInSystem(system)
+    waypoints = listWaypointsInSystem(system, limit=20)
     jump_gate = None
     chart_count = 0
     speed = ""
+    if limit_fuel:
+        speed = "BURN"
     for wp in waypoints["data"]:
         if wp["type"] == "JUMP_GATE":
             jump_gate = wp
@@ -276,6 +321,7 @@ def chart_system(ship, system, limit_fuel=True):
                     navigate(ship, wp["symbol"], nav_and_sleep=True)
                     c = chart_wp(ship)
                     if c:
+                        chart_count += 1
                         for t2 in c["data"]["waypoint"]["traits"]:
                             if t2["symbol"] == "MARKETPLACE":
                                 mark = otherFunctions.getMarket(wp["systemSymbol"], wp["symbol"])
@@ -285,8 +331,7 @@ def chart_system(ship, system, limit_fuel=True):
                                         refuel(ship)
                                         orbit(ship)
                                         otherFunctions.patchShipNav(ship, "BURN")
-
-                    chart_count += 1
+                                        speed = "BURN"
     if jump_gate is not None:
         if limit_fuel:
             if speed == "BURN":
@@ -338,7 +383,7 @@ def shipLoop(ship, lock=None, surveys=None):
                 fullCargo = True
             if fullCargo or collected / capacity >= 0.67:
                 dock(ship)
-                c = sell(ship, ITEM)
+                c = sell_all(ship, ITEM)
                 capacity = c["capacity"]
                 collected = c["units"]
                 print(ship + ": " + str(collected) + "/" + str(capacity))
@@ -352,7 +397,7 @@ def shipLoop(ship, lock=None, surveys=None):
                     delivery = deliver(ship, ITEM[0], collected, CONTRACT)
                     if delivery["data"]["contract"]["terms"]["deliver"][0]["unitsRequired"] == \
                             delivery["data"]["contract"]["terms"]["deliver"][0]["unitsFulfilled"]:
-                        ITEM.pop()
+                        ITEM.pop(0)
                         otherFunctions.fulfillContract(CONTRACT)
                     print(ship + ": " + str(delivery))
                     print(ship + ": " + str(refuel(ship)))
@@ -473,6 +518,33 @@ def get_ships_by_frame(all_ships, frame):
             frame_ships.append(ship)
     return frame_ships
 
+
+def get_ships_by_mounts(all_ships, desired_mounts_list=None, disallowed_mounts_list=None):
+    if desired_mounts_list is None:
+        desired_mounts_list = []
+    if disallowed_mounts_list is None:
+        disallowed_mounts_list = []
+
+    equipped_ships = []
+
+    for ship in all_ships:
+        equipment_list = ship["mounts"]
+        if len(desired_mounts_list) == 0:
+            equipped = True
+        else:
+            equipped = False
+        for mount in equipment_list:
+            if mount["symbol"] in desired_mounts_list:
+                equipped = True
+        for mount in equipment_list:
+            if mount["symbol"] in disallowed_mounts_list:
+                equipped = False
+
+        if equipped:
+            equipped_ships.append(ship)
+    return equipped_ships
+
+
 def ships_to_names(ships):
     names = []
     for ship in ships:
@@ -481,6 +553,8 @@ def ships_to_names(ships):
 
 
 def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30):
+    #TODO: spawn survey ships up to 20% of the number of ore hounds
+    import buyShip
     new_threads = []
 
     all_ships = get_all_ships()
@@ -515,14 +589,15 @@ def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30):
             new_threads.append(new_thread)
             new_thread.start()
             print("New Ship:", new_ship)
+            num_hounds += 1
 
         time.sleep(600)
 
 
-def survey_loop(ship, lock: threading.Lock, surveys):
+def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
     orbit(ship)
     while True:
-        if len(surveys) < 50:
+        if len(surveys) < max_num_surveys:
             new_survey = createSurvey(ship)
             if new_survey is not False:
                 cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
@@ -576,7 +651,7 @@ def is_good(survey):
     if len(last_hundred_survey_values) < 100:
         return True
     else:
-        last_hundred_survey_values.pop()
+        last_hundred_survey_values.pop(0)
     top_30 = last_hundred_survey_values.copy()
     top_30.sort(reverse=True)
     threshold = top_30[30]
@@ -636,7 +711,7 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
         if ship_data["data"]["nav"]["status"] != "DOCKED":
             dock(ship)
         try:
-            sell(ship)
+            sell_all(ship)
         except KeyError:
             jettison(ship)
         orbit(ship)
@@ -659,7 +734,7 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
         orbit(ship)
         navigate(ship, sell_waypoint, True)
         dock(ship)
-        s = sell2(ship, item, capacity)
+        s = sell(ship, item, capacity)
         refuel(ship)
         gross = s["data"]["transaction"]["pricePerUnit"]
         orbit(ship)
@@ -671,13 +746,23 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
 
 def main():
     all_ships = get_all_ships()
-    miningDrones = ["EKMON-1"]
-    miningDrones.extend(ships_to_names(get_ships_by_frame(all_ships, "FRAME_MINER")))
-    survey_ships = ships_to_names(get_ships_by_frame(all_ships, "FRAME_REFINING_FREIGHTER"))
+
+    survey_mounts = ["MOUNT_SURVEYOR_I",
+                     "MOUNT_SURVEYOR_II",
+                     "MOUNT_SURVEYOR_III"
+                     ]
+    mining_mounts = ["MOUNT_MINING_LASER_I",
+                     "MOUNT_MINING_LASER_II",
+                     "MOUNT_MINING_LASER_III"]
+
+    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts, survey_mounts))
+    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts, mining_mounts))
 
     threads = []
     survey_lock = threading.Lock()
     surveys = []
+
+    max_num_surveys = min(100, 2*len(mining_ships))
 
     x = threading.Thread(target=mat_val_updater, daemon=True)
     threads.append(x)
@@ -686,7 +771,7 @@ def main():
     time.sleep(1)
 
     for surveyor in survey_ships:
-        x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys), daemon=True)
+        x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys, max_num_surveys), daemon=True)
         threads.append(x)
         x.start()
         print("surveyor started!", surveyor)
@@ -698,7 +783,7 @@ def main():
         time.sleep(1)
     time.sleep(len(survey_ships) + 1)
 
-    for drone in miningDrones:
+    for drone in mining_ships:
         x = threading.Thread(target=shipLoop, args=(drone, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()

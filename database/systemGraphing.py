@@ -19,6 +19,7 @@ def make_dij_graph(all_systems):
                 dij.add_edge(s1["symbol"], s2["symbol"], 1)
             else:
                 dij.add_edge(s1["symbol"], s2["symbol"], dist)
+    return dij
 
 
 def dij_path(graph, start_name, end_name):
