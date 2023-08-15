@@ -552,16 +552,31 @@ def ships_to_names(ships):
     return names
 
 
-def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30):
+def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30, max_surveys=100):
     #TODO: spawn survey ships up to 20% of the number of ore hounds
     import buyShip
     new_threads = []
 
     all_ships = get_all_ships()
-    all_hounds = get_ships_by_frame(all_ships, "FRAME_MINER")
-    num_hounds = len(all_hounds)
 
-    while num_hounds < max_hounds:
+    survey_mounts = ["MOUNT_SURVEYOR_I",
+                     "MOUNT_SURVEYOR_II",
+                     "MOUNT_SURVEYOR_III"
+                     ]
+    mining_mounts = ["MOUNT_MINING_LASER_I",
+                     "MOUNT_MINING_LASER_II",
+                     "MOUNT_MINING_LASER_III"]
+
+    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts, survey_mounts))
+    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts, mining_mounts))
+
+    num_hounds = len(mining_ships)
+    num_surveyors = len(survey_ships)
+
+    surveyors_per_miner = 0.2
+    max_surveyors = max_hounds * surveyors_per_miner
+
+    while num_hounds < max_hounds or num_surveyors < max_surveyors:
         agent = otherFunctions.getAgent()
         credits = agent["data"]["credits"]
         shipyard = buyShip.getShipyard()
@@ -584,12 +599,19 @@ def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30):
         print("COST:", total_price)
         print("***")
         if credits > total_price:
-            new_ship = buyShip.buyOreHound()
-            new_thread = threading.Thread(target=shipLoop, args=(new_ship, lock, surveys), daemon=True)
-            new_threads.append(new_thread)
-            new_thread.start()
-            print("New Ship:", new_ship)
-            num_hounds += 1
+            if num_surveyors < num_hounds * surveyors_per_miner:
+                new_ship = buyShip.buySurveyHound()
+                new_thread = threading.Thread(target=survey_loop, args=(new_ship, lock, surveys, max_surveys), daemon=True)
+                new_threads.append(new_thread)
+                new_thread.start()
+                num_surveyors += 1
+            else:
+                new_ship = buyShip.buyOreHound()
+                new_thread = threading.Thread(target=shipLoop, args=(new_ship, lock, surveys), daemon=True)
+                new_threads.append(new_thread)
+                new_thread.start()
+                print("New Ship:", new_ship)
+                num_hounds += 1
 
         time.sleep(600)
 
@@ -789,7 +811,7 @@ def main():
         x.start()
         print("miner started!", drone)
 
-    x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys), daemon=True)
+    x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys, 40, max_num_surveys), daemon=True)
     threads.append(x)
     x.start()
 

@@ -230,6 +230,7 @@ def get_all_waypoints(all_systems):
                 print(len(all_waypoints))
     return all_waypoints
 
+
 def get_all_waypoints_generator(all_systems):
     notable_systems = get_notable_systems(all_systems)
     for s in notable_systems:
@@ -264,6 +265,9 @@ def populate_waypoints(all_systems):
         cmd = waypoint_to_sql(wp_obj, needs_update)
         if cmd:
             cursor.execute(cmd)
+
+        if wp_obj.chart is not None:
+            record_chart(wp_obj)
         counter += 1
         print("\r", counter, wp["symbol"], end="")
 
@@ -272,6 +276,29 @@ def populate_systems(all_systems):
     for s in all_systems:
         cmd = sector_to_sql(s)
         cursor.execute(cmd)
+
+
+def record_chart(wp):
+    chart = wp.chart
+    symbol = wp.symbol
+    cmd = "SELECT * FROM Charts WHERE (Charts.waypointSymbol='" + symbol + "');"
+    cursor.execute(cmd)
+    all_factions = ["COSMIC", "VOID", "GALACTIC", "QUANTUM", "DOMINION", "ASTRO", "CORSAIRS", "OBSIDIAN", "AEGIS",
+                    "UNITED", "SOLITARY", "COBALT", "OMEGA", "ECHO", "LORDS", "CULT", "ANCIENTS", "SHADOW", "ETHEREAL"]
+    if cursor.fetchone() is None:
+        ship = chart["submittedBy"]
+        if ship in all_factions:
+            agent = ship
+        else:
+            sub_agent = ship.split("-")
+            agent = sub_agent.pop(0)
+            for x in sub_agent[0:-1]:
+                agent += "-" + x
+        access_insert_entry("Charts", ["waypointSymbol", "submittedBy", "submittedByAgent"], [symbol, ship, agent])
+        submission_time = datetime.datetime.strptime(chart["submittedOn"], '%Y-%m-%dT%H:%M:%S.%fZ')
+        access_update_entry("Charts", ["submittedOn"], [submission_time], ["waypointSymbol"], [symbol])
+
+
 
 
 def get_systems_from_access():
@@ -341,6 +368,35 @@ def get_waypoints_from_access():
                 traits.append({"symbol": trait_name})
         waypoints.append(dict_wp)
     return waypoints
+
+
+def get_markets_from_access():
+    marketplaces = {}
+    cursor.execute("SELECT * FROM Markets")
+    for marketplace_entry in cursor:
+        waypoint_symbol = marketplace_entry[1]
+        if waypoint_symbol not in marketplaces.keys():
+            marketplaces[waypoint_symbol] = {
+                "symbol": waypoint_symbol,
+                "tradeGoods": []
+            }
+        trade_good = {
+            "symbol": marketplace_entry[2],
+            "tradeVolume": 1,
+            "supply": "NOT SET",
+            "purchasePrice": 99999,
+            "sellPrice": 0
+        }
+        if marketplace_entry[3] > 0:
+            trade_good["tradeVolume"] = marketplace_entry[3]
+            trade_good["supply"] = marketplace_entry[4]
+            trade_good["purchasePrice"] = marketplace_entry[5]
+            trade_good["sellPrice"] = marketplace_entry[6]
+        marketplaces[waypoint_symbol]["tradeGoods"].append(trade_good)
+    markets_list = []
+    for marketplace in marketplaces.values():
+        markets_list.append(marketplace)
+    return markets_list
 
 
 def access_insert_entry(table_name, column_name_list, value_list):
