@@ -9,7 +9,7 @@ myClient = client.Client("", "")
 
 UTC_NOW = dt.datetime.now(dt.timezone.utc)
 TARGET_UNAME = "EKMON"
-STARTING_FACTION = "DOMINION"
+STARTING_FACTION = "COSMIC"
 EMAIL = None
 
 # all_factions = ["COSMIC",   "VOID",     "GALACTIC", "QUANTUM",  "DOMINION",

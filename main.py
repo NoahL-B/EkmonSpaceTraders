@@ -1,20 +1,27 @@
 import math
+import random
 import time
 import threading
 import json
-
-import otherFunctions
-
 from datetime import datetime, timedelta
 
+import hauling
 from SECRETS import TOKEN
 from SHARED import myClient
+
+
+import otherFunctions
+import database.waypointGraphing as waypointGraphing
+import database.dbFunctions as dbFunctions
+
+
+
 
 
 SYSTEM = ""
 CONTRACT = ""
 ITEM = []
-ASTEROIDS = ""
+ASTEROIDS = "X1-DP28-DC5X"
 SHIPYARD = ""
 DELIVERY = ""
 
@@ -41,11 +48,6 @@ def init_globals():
         CONTRACT = ""
         DELIVERY = ""
     waypoints_list = otherFunctions.getWaypoints(SYSTEM)["data"]
-    for wp in waypoints_list:
-        if wp["type"] == "ASTEROID_FIELD":
-            ASTEROIDS = wp["symbol"]
-        elif wp["type"] == "ORBITAL_STATION":
-            SHIPYARD = wp["symbol"]
 
 
 def get_all_contracts():
@@ -55,10 +57,10 @@ def get_all_contracts():
         "page": 1
     }
     page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
-    num_ships = page["meta"]["total"]
+    num_contracts = page["meta"]["total"]
     all_contracts = page["data"]
 
-    while num_ships > len(all_contracts):
+    while num_contracts > len(all_contracts):
         params["page"] += 1
         page = myClient.generic_api_call("GET", endpoint, params, TOKEN)
         all_contracts.extend(page["data"])
@@ -146,23 +148,111 @@ def sell_all(ship, saved=None):
 def sell(ship, item, quantity):
     endpoint = "v2/my/ships/" + ship + "/sell"
     params = {"symbol": item, "units": quantity}
-    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    sale = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    if sale:
+        waypoint = sale['data']['transaction']['waypointSymbol']
+        system = waypoint
+        while system[-1] != '-':
+            system = system[:-1]
+        system = system[:-1]
+        dbFunctions.getMarket(system, waypoint)
+    return sale
 
 
 def purchase(ship, item, units):
     endpoint = "v2/my/ships/" + ship + "/purchase"
     params = {"symbol": item, "units": units}
-    p = myClient.generic_api_call("POST", endpoint, params, TOKEN)
-    return p
+    purchase = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    if purchase:
+        waypoint = purchase['data']['transaction']['waypointSymbol']
+        system = waypoint
+        while system[-1] != '-':
+            system = system[:-1]
+        system = system[:-1]
+        dbFunctions.getMarket(system, waypoint)
+    return purchase
 
 
 def navigate(ship, location, nav_and_sleep=False):
     endpoint = "v2/my/ships/" + ship + "/navigate"
     params = {"waypointSymbol": location}
     to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+    if not to_return:
+        ship_status = get_ship(ship)
+        nav = ship_status['data']['nav']
+        if nav['status'] == 'IN_TRANSIT':
+            if nav['route']['destination']['symbol'] == location:
+                if nav_and_sleep:
+                    time.sleep(nav_to_time_delay(ship_status))
+                return ship_status
+            else:
+                return to_return
+        elif nav['status'] == 'DOCKED':
+            orbit(ship)
+            return navigate(ship, location, nav_and_sleep)
+        elif nav['status'] == 'IN_ORBIT':
+            if nav['route']['destination']['symbol'] == location:
+                return ship_status
+            else:
+                return to_return
+
     if nav_and_sleep:
         time.sleep(nav_to_time_delay(to_return))
     return to_return
+
+
+def auto_nav(ship, destination):
+    ship_stats = get_ship(ship)
+    system = ship_stats['data']['nav']['systemSymbol']
+    origin = ship_stats['data']['nav']['waypointSymbol']
+    status = ship_stats['data']['nav']['status']
+    if status == "DOCKED":
+        orbit(ship)
+    elif status == "IN_TRANSIT":
+        sleep_until_arrival(ship)
+    if origin == destination:
+        return
+
+    all_waypoints = dbFunctions.get_waypoints_from_access(system)
+
+    origin_in_access = False
+    destination_in_access = False
+
+    for wp in all_waypoints:
+        if not origin_in_access:
+            if wp['symbol'] == origin:
+                origin_in_access = True
+        if not destination_in_access:
+            if wp['symbol'] == destination:
+                destination_in_access = True
+
+    if not origin_in_access or not destination_in_access:
+        all_waypoints = dbFunctions.get_all_waypoints_in_system(system)
+
+    fuel = ship_stats['data']['fuel']['current']
+    fuel_cap = ship_stats['data']['fuel']['capacity']
+
+    burn = ship_stats['data']['nav']['flightMode'] == "BURN"
+
+    dij_graph = waypointGraphing.make_dij_graph(all_waypoints, fuel_cap, burn)
+
+
+    path = waypointGraphing.dij_path(dij_graph, origin, destination)
+
+
+    waypoint_num = 0
+
+    while waypoint_num < len(path.edges):
+
+        fuel_required = path.edges[waypoint_num] % 10000
+        if fuel_required > fuel:
+            dock(ship)
+            refuel(ship)
+            orbit(ship)
+        nav = navigate(ship, path.nodes[waypoint_num + 1], True)
+        fuel = nav['data']['fuel']['current']
+        waypoint_num += 1
 
 
 def jump(ship, system, jump_and_sleep=False):
@@ -248,6 +338,17 @@ def deliver(ship, item, quantity, contract):
     params = {"shipSymbol": ship, "tradeSymbol": item, "units": quantity}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
+def supply_construction(ship, system, waypoint, item, quantity):
+    endpoint = "v2/systems/" + system + "/waypoints/" + waypoint + "/construction/supply"
+    params = {"shipSymbol": ship, "tradeSymbol": item, "units": quantity}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+
+def get_construction(system, waypoint):
+    endpoint = "v2/systems/" + system + "/waypoints/" + waypoint + "/construction"
+    params = None
+    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
 def refuel(ship):
     endpoint = "v2/my/ships/" + ship + "/refuel"
@@ -359,7 +460,7 @@ def shipLoop(ship, lock=None, surveys=None):
     while True:
         new_time = datetime.now()
         diff = new_time - timeSinceLast
-        print(ship, diff)
+        # print(ship, diff)
         timeSinceLast = new_time
         try:
             fullCargo = False
@@ -418,6 +519,36 @@ def shipLoop(ship, lock=None, surveys=None):
             orbit(ship)
             time.sleep(60)
 
+
+def minerLoop(ship, lock=None, surveys=None):
+    orbit(ship)
+    timeSinceLast = datetime.now()
+    while True:
+        new_time = datetime.now()
+        diff = new_time - timeSinceLast
+        # print(ship, diff)
+        timeSinceLast = new_time
+        try:
+            survey = None
+            if lock is not None and surveys is not None:
+                while not lock.acquire():
+                    time.sleep(1)
+                if len(surveys) > 0:
+                    survey = surveys.pop(0)
+                lock.release()
+            extraction = dumb_extract(ship, survey)
+            if not extraction:
+                print(ship + ": " + str(extraction))
+            elif extraction['data']['extraction']['yield']['units'] >= 0:
+                print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
+
+            cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
+            time.sleep(cooldown)
+        except TypeError as e:
+            print(ship + ": ****************************ERROR************************")
+            print(e)
+            orbit(ship)
+            time.sleep(70)
 
 def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None,
                jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None,
@@ -484,6 +615,70 @@ def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_ori
                 too_expensive = True
 
     return not too_expensive
+
+
+def haulerLoopB(hauling_ship, mining_ships, lock):
+    hauler = hauling_ship
+
+    excavators = mining_ships
+
+    asteroid = "X1-DP28-DC5X"
+
+    hauling.sell_off_existing_cargo(hauler)
+
+
+    while True:
+        try:
+
+            auto_nav(hauler, asteroid)
+
+            ship = get_ship(hauler)
+            capacity = ship['data']['cargo']['capacity']
+            inventory_size = ship['data']['cargo']['units']
+
+            full = capacity == inventory_size
+
+            try:
+
+                while not lock.acquire():
+                    time.sleep(1)
+
+                while not full:
+
+                    for e in excavators:
+                        if capacity > inventory_size:
+                            result = cargo(e)
+                            inventory = result['data']['inventory']
+
+                            for i in inventory:
+                                num_units = i['units']
+                                if num_units > capacity - inventory_size:
+                                    num_units = capacity - inventory_size
+                                if num_units > 0:
+                                    otherFunctions.transfer(e, hauler, i['symbol'], num_units)
+                                    inventory_size += num_units
+
+                    c = cargo(hauler)['data']
+                    if c['units'] > 0:
+                        print(hauler + ': ' + str(c))
+
+
+                    full = c['units'] >= capacity * 0.9
+                    if not full:
+                        sleep_time = random.randint(10, 20)
+                        time.sleep(sleep_time)
+
+
+            finally:
+                lock.release()
+
+
+            print("Thing 1", hauler)
+            hauling.sell_off_existing_cargo(hauler)
+            print("Thing 2", hauler)
+
+        except TypeError:
+            time.sleep(60)
 
 
 def get_all_ships():
@@ -643,7 +838,7 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
                     while not lock.acquire():
                         time.sleep(1)
                     surveys.extend(gsc)
-                    print("NUM SURVEYS:", len(surveys))
+                    # print("NUM SURVEYS:", len(surveys))
                     lock.release()
                 time.sleep(cooldown)
             else:
@@ -653,14 +848,14 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
 
 
 material_values = {
-    "ALUMINUM_ORE": 20,
+    "ALUMINUM_ORE": 80,
     "AMMONIA_ICE": 38,
-    "COPPER_ORE": 2,
-    "ICE_WATER": 11,
-    "IRON_ORE": 2,
+    "COPPER_ORE": 76,
+    "ICE_WATER": 2,
+    "IRON_ORE": 62,
     "PRECIOUS_STONES": 2,
-    "QUARTZ_SAND": 18,
-    "SILICON_CRYSTALS": 33
+    "QUARTZ_SAND": 28,
+    "SILICON_CRYSTALS": 45
 }
 avg = sum(material_values.values()) / len(material_values)
 last_hundred_survey_values = [avg for _ in range(100)]
@@ -705,12 +900,6 @@ def update_material_values():
         material_values[t["symbol"]] = t["sellPrice"]
     return True
 
-
-def mat_val_updater(frequency=600):
-    while True:
-        update_material_values()
-        print("Updated Mat Val:", material_values)
-        time.sleep(frequency)
 
 
 def jettison(ship):
@@ -768,6 +957,8 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
 
 def main():
     all_ships = get_all_ships()
+    if all_ships[0]['symbol'] == "EKMON-1":
+        all_ships.pop(0)
 
     survey_mounts = ["MOUNT_SURVEYOR_I",
                      "MOUNT_SURVEYOR_II",
@@ -777,8 +968,8 @@ def main():
                      "MOUNT_MINING_LASER_II",
                      "MOUNT_MINING_LASER_III"]
 
-    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts, survey_mounts))
-    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts, mining_mounts))
+    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts))
+    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts))
 
     threads = []
     survey_lock = threading.Lock()
@@ -786,11 +977,18 @@ def main():
 
     max_num_surveys = min(100, 2*len(mining_ships))
 
-    x = threading.Thread(target=mat_val_updater, daemon=True)
-    threads.append(x)
-    x.start()
-    print("Material Value Updater Started!")
-    time.sleep(1)
+    collection_lock = threading.Lock()
+
+    for hauler in ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-24", "EKMON-25"]:
+        x = threading.Thread(target=haulerLoopB, args=(hauler, mining_ships, collection_lock), daemon=True)
+        threads.append(x)
+        x.start()
+
+
+    for hauler in []:  # ["EKMON-24", "EKMON-25"]:
+        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(SYSTEM, hauler, ['FUEL', 'FAB_MATS']), daemon=True)
+        threads.append(x)
+        x.start()
 
     for surveyor in survey_ships:
         x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys, max_num_surveys), daemon=True)
@@ -806,23 +1004,38 @@ def main():
     time.sleep(len(survey_ships) + 1)
 
     for drone in mining_ships:
-        x = threading.Thread(target=shipLoop, args=(drone, survey_lock, surveys), daemon=True)
+        x = threading.Thread(target=minerLoop, args=(drone, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()
         print("miner started!", drone)
 
-    x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys, 40, max_num_surveys), daemon=True)
-    threads.append(x)
-    x.start()
+    #x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys, 40, max_num_surveys), daemon=True)
+    #threads.append(x)
+    #x.start()
 
     if __name__ == '__main__':
         while True:
-            pass
-
+            time.sleep(100)
     return threads
+
+
+def main2():
+    import hauling
+    for hauler in ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-24", "EKMON-25"]:
+        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(SYSTEM, hauler, ['FUEL', 'FAB_MATS']), daemon=True)
+        x.start()
+        time.sleep(5)
+
+    if __name__ == '__main__':
+        while True:
+            time.sleep(100)
 
 
 init_globals()
 
 if __name__ == '__main__':
+
+    import faulthandler
+    faulthandler.enable()
+
     main()

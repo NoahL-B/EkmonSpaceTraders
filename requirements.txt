@@ -2,3 +2,4 @@ Dijkstar~=2.6.0
 SpacePyTraders~=0.0.6
 pyodbc
 ratelimit
+pygame
