@@ -3,6 +3,8 @@ from main import *
 
 def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type="MARKET",
                 stop_on_unprofitable_origin=True, stop_on_unprofitable_destination=True):
+    sell_off_existing_cargo(ship)
+
     print("Flying", ship, "from", origin_waypoint, "to", destination_waypoint, "transporting", product, "to a",
           destination_type)
 
@@ -422,7 +424,7 @@ def choose_trade_run_loop(system, ship, ignored_goods=('FUEL',)):
         highest_sell_prices = {}
         for marketplace in local_markets:
             for item in marketplace['tradeGoods']:
-                if item['type'] in ['IMPORT', 'EXCHANGE'] and item['supply'] in ['ABUNDANT', 'HIGH', 'MODERATE']:
+                if item['type'] in ['EXPORT', 'EXCHANGE'] and item['supply'] in ['ABUNDANT', 'HIGH', 'MODERATE']:
                     if item['symbol'] not in lowest_buy_prices.keys():
                         lowest_buy_prices[item['symbol']] = (marketplace['symbol'], item['purchasePrice'])
                     else:
@@ -493,11 +495,11 @@ if __name__ == '__main__':
     e = "EKMON-24"
     f = "EKMON-25"
 
-    choose_trade_run_loop(SYSTEM, c, ['FUEL', 'FAB_MATS'])
-    main_2(f)
+    # main_2(b)
     sell_off_existing_cargo(a)
-    sell_off_existing_cargo(b)
+    # sell_off_existing_cargo(b)
     sell_off_existing_cargo(c)
     sell_off_existing_cargo(d)
     sell_off_existing_cargo(e)
     sell_off_existing_cargo(f)
+    choose_trade_run_loop(SYSTEM, d, ['FUEL', 'FAB_MATS'])
