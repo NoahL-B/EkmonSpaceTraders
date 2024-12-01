@@ -204,7 +204,7 @@ def get_all_systems():
 
     for page in range(1, num_pages + 1):
         l = listSystems(systems_per_page, page)
-        for i in range(systems_per_page):
+        for i in range(len(l['data'])):
             all_systems.append(l["data"][i])
             print(l["data"][i]["symbol"])
         print("Page", page, "of", num_pages)
@@ -275,6 +275,7 @@ def populate_markets():
             if trait["symbol"] == "MARKETPLACE":
                 getMarket(wp["systemSymbol"], wp["symbol"])
 
+
 def populate_waypoints(all_systems):
     access_waypoints = get_waypoints_from_access()
     access_waypoint_symbols = []
@@ -285,22 +286,30 @@ def populate_waypoints(all_systems):
 
     for wp in get_all_waypoints_generator(all_systems):
         wp_obj = Waypoint.Waypoint(wp)
-        needs_update = False
-        if wp["symbol"] in access_waypoint_symbols:
-            needs_update = True
-        cmd = waypoint_to_sql(wp_obj, needs_update)
-        if cmd:
-            while not DB_LOCK.acquire(timeout=10):
-                time.sleep(1)
-            try:
-                cursor.execute(cmd)
-            finally:
-                DB_LOCK.release()
-
-        if wp_obj.chart is not None:
-            record_chart(wp_obj)
+        populate_waypoint(wp_obj, access_waypoint_symbols)
         counter += 1
         print("\r", counter, wp["symbol"], end="")
+
+
+def populate_waypoint(wp_object, access_waypoint_symbols=None):
+    if access_waypoint_symbols is None:
+        access_waypoints = get_waypoints_from_access()
+        access_waypoint_symbols = []
+        for awp in access_waypoints:
+            access_waypoint_symbols.append(awp["symbol"])
+    needs_update = False
+    if wp_object.symbol in access_waypoint_symbols:
+        needs_update = True
+    cmd = waypoint_to_sql(wp_object, needs_update)
+    if cmd:
+        DB_LOCK.acquire()
+        try:
+            cursor.execute(cmd)
+        finally:
+            DB_LOCK.release()
+
+    if wp_object.chart is not None:
+        record_chart(wp_object)
 
 
 def populate_systems(all_systems):
@@ -312,8 +321,7 @@ def populate_systems(all_systems):
     for s in all_systems:
         if s["symbol"] not in access_system_symbols:
             cmd = sector_to_sql(s)
-            while not DB_LOCK.acquire(timeout=10):
-                time.sleep(1)
+            DB_LOCK.acquire()
             try:
                 cursor.execute(cmd)
             finally:
@@ -324,33 +332,35 @@ def record_chart(wp):
     chart = wp.chart
     symbol = wp.symbol
     cmd = "SELECT * FROM Charts WHERE (Charts.waypointSymbol='" + symbol + "');"
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
+    DB_LOCK.acquire()
+
     try:
         cursor.execute(cmd)
-
-        all_factions = ["COSMIC", "VOID", "GALACTIC", "QUANTUM", "DOMINION", "ASTRO", "CORSAIRS", "OBSIDIAN", "AEGIS",
-                        "UNITED", "SOLITARY", "COBALT", "OMEGA", "ECHO", "LORDS", "CULT", "ANCIENTS", "SHADOW", "ETHEREAL"]
+        needs_recording = False
         if cursor.fetchone() is None:
-            ship = chart["submittedBy"]
-            if ship in all_factions:
-                agent = ship
-            else:
-                sub_agent = ship.split("-")
-                agent = sub_agent.pop(0)
-                for x in sub_agent[0:-1]:
-                    agent += "-" + x
-            access_insert_entry("Charts", ["waypointSymbol", "submittedBy", "submittedByAgent"], [symbol, ship, agent])
-            submission_time = datetime.datetime.strptime(chart["submittedOn"], '%Y-%m-%dT%H:%M:%S.%fZ')
-            access_update_entry("Charts", ["submittedOn"], [submission_time], ["waypointSymbol"], [symbol])
+            needs_recording = True
     finally:
         DB_LOCK.release()
+    all_factions = ["COSMIC", "VOID", "GALACTIC", "QUANTUM", "DOMINION", "ASTRO", "CORSAIRS", "OBSIDIAN", "AEGIS",
+                    "UNITED", "SOLITARY", "COBALT", "OMEGA", "ECHO", "LORDS", "CULT", "ANCIENTS", "SHADOW", "ETHEREAL"]
+    if needs_recording:
+        ship = chart["submittedBy"]
+        if ship in all_factions:
+            agent = ship
+        else:
+            sub_agent = ship.split("-")
+            agent = sub_agent.pop(0)
+            for x in sub_agent[0:-1]:
+                agent += "-" + x
+        access_insert_entry("Charts", ["waypointSymbol", "submittedBy", "submittedByAgent"], [symbol, ship, agent])
+        submission_time = datetime.datetime.strptime(chart["submittedOn"], '%Y-%m-%dT%H:%M:%S.%fZ')
+        access_update_entry("Charts", ["submittedOn"], [submission_time], ["waypointSymbol"], [symbol])
+
 
 def get_systems_from_access():
     raw_systems = []
 
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
+    DB_LOCK.acquire()
     try:
         cursor.execute("SELECT * FROM System")
         for row in cursor:
@@ -400,12 +410,9 @@ def get_systems_from_access():
 def get_waypoints_from_access(system=None):
     waypoints = []
 
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
+    DB_LOCK.acquire()
     try:
         cursor.execute("SELECT * FROM (Waypoint LEFT JOIN Charts ON (Waypoint.symbol = Charts.WaypointSymbol))")
-
-
 
         for raw_wp in cursor:
             if system is None or raw_wp[2] == system:
@@ -422,17 +429,17 @@ def get_waypoints_from_access(system=None):
                 if faction is not None and faction != "":
                     dict_wp["faction"] = faction
 
-                for trait_num in range(6, 65): # TODO: this is broken now that there are more traits
+                for trait_num in range(6, 75):
                     if raw_wp[trait_num]:
                         trait_name = raw_wp.cursor_description[trait_num][0]
                         traits.append({"symbol": trait_name})
 
-                if raw_wp[65] is not None:
+                if raw_wp[75] is not None:
                     chart = {
-                        "waypointSymbol": raw_wp[65],
-                        "submittedBy": raw_wp[66],
-                        "submittedOn": raw_wp[67],
-                        "submittedByAgent": raw_wp[68]
+                        "waypointSymbol": raw_wp[75],
+                        "submittedBy": raw_wp[76],
+                        "submittedOn": raw_wp[77],
+                        "submittedByAgent": raw_wp[78]
                     }
                     dict_wp["chart"] = chart
 
@@ -444,9 +451,8 @@ def get_waypoints_from_access(system=None):
 
 def get_markets_from_access():
     marketplaces = {}
+    DB_LOCK.acquire()
 
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
     try:
         cursor.execute("SELECT * FROM Markets")
         for marketplace_entry in cursor:
@@ -488,8 +494,7 @@ def access_insert_entry(table_name, column_name_list, value_list):
     for value in value_list[1:]:
         cmd += "', '" + str(value)
     cmd += "');"
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
+    DB_LOCK.acquire()
     try:
         cursor.execute(cmd)
     finally:
@@ -505,9 +510,7 @@ def access_update_entry(table_name, update_column_name_list, update_value_list, 
         cmd += " AND ((" + table_name + "." + where_column_name_list[i] + ')=?)'
     cmd += ");"
     params = tuple(update_value_list + where_value_list)
-
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
+    DB_LOCK.acquire()
     try:
         cursor.execute(cmd, params)
     finally:

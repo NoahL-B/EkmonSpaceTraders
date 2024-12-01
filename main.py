@@ -3,7 +3,7 @@ import random
 import time
 import threading
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import hauling
 from SECRETS import TOKEN
@@ -13,10 +13,7 @@ from SHARED import myClient
 import otherFunctions
 import database.waypointGraphing as waypointGraphing
 import database.dbFunctions as dbFunctions
-
-
-
-
+from database.Waypoint import Waypoint, getWaypoint
 
 SYSTEM = ""
 CONTRACT = ""
@@ -214,6 +211,13 @@ def auto_nav(ship, destination):
     if origin == destination:
         return
 
+    if ship_stats['data']['registration']['role'] == "SATELLITE":
+        navigate(ship, destination, True)
+        return
+    if ship_stats['data']['nav']['flightMode'] == "DRIFT":
+        navigate(ship, destination, True)
+        return
+
     all_waypoints = dbFunctions.get_waypoints_from_access(system)
 
     origin_in_access = False
@@ -246,12 +250,31 @@ def auto_nav(ship, destination):
     while waypoint_num < len(path.edges):
 
         fuel_required = path.edges[waypoint_num] % 10000
+        fueled_up = True
         if fuel_required > fuel:
-            dock(ship)
-            refuel(ship)
-            orbit(ship)
-        nav = navigate(ship, path.nodes[waypoint_num + 1], True)
-        fuel = nav['data']['fuel']['current']
+            fueled_up = False
+            for wp in all_waypoints:
+                if wp['symbol'] == path.nodes[waypoint_num]:
+                    for t in wp['traits']:
+                        if t['symbol'] == "MARKETPLACE":
+                            dock(ship)
+                            fueled_up = refuel(ship)
+                            orbit(ship)
+        if fueled_up:
+            nav = navigate(ship, path.nodes[waypoint_num + 1], True)
+            fuel = nav['data']['fuel']['current']
+        else:
+            start_speed = ship_stats['data']['nav']['flightMode']
+            if start_speed == "BURN":
+                new_speed = "CRUISE"
+            else:
+                new_speed = "DRIFT"
+            print("Slowing down", ship, "to", new_speed, "speed")
+            otherFunctions.patchShipNav(ship, new_speed)
+            auto_nav(ship, path.nodes[waypoint_num + 1])
+            print("Returning", ship, "to", start_speed, "speed")
+            otherFunctions.patchShipNav(ship, start_speed)
+
         waypoint_num += 1
 
 
@@ -399,51 +422,48 @@ def sleep_until_arrival(ship, sleep_counter=False):
     return ship_data
 
 
-def chart_system(ship, system, limit_fuel=True):
-    from database.System import listWaypointsInSystem
-    waypoints = listWaypointsInSystem(system, limit=20)
-    jump_gate = None
+def chart_system(ship, system=None, limit_fuel=True):
+    ship_stats = get_ship(ship)
+    system = ship_stats['data']['nav']['systemSymbol']
+    waypoints = dbFunctions.get_waypoints_from_access(system)
     chart_count = 0
-    speed = ""
-    if limit_fuel:
-        speed = "BURN"
-    for wp in waypoints["data"]:
-        if wp["type"] == "JUMP_GATE":
-            jump_gate = wp
-        else:
-            for t in wp["traits"]:
-                if t["symbol"] == "UNCHARTED":
-                    if limit_fuel:
-                        if speed == "BURN":
-                            s = get_ship(ship)
-                            if s["data"]["fuel"]["current"] < 500:
-                                otherFunctions.patchShipNav(ship, "DRIFT")
-                                speed = "DRIFT"
-                    navigate(ship, wp["symbol"], nav_and_sleep=True)
-                    c = chart_wp(ship)
-                    if c:
-                        chart_count += 1
-                        for t2 in c["data"]["waypoint"]["traits"]:
-                            if t2["symbol"] == "MARKETPLACE":
-                                mark = otherFunctions.getMarket(wp["systemSymbol"], wp["symbol"])
-                                for good in mark["data"]["tradeGoods"]:
-                                    if good["symbol"] == "FUEL":
-                                        dock(ship)
-                                        refuel(ship)
-                                        orbit(ship)
-                                        otherFunctions.patchShipNav(ship, "BURN")
-                                        speed = "BURN"
-    if jump_gate is not None:
-        if limit_fuel:
-            if speed == "BURN":
-                s = get_ship(ship)
-                if s["data"]["fuel"]["current"] < 500:
-                    otherFunctions.patchShipNav(ship, "DRIFT")
-        navigate(ship, jump_gate["symbol"], nav_and_sleep=True)
-        for t in jump_gate["traits"]:
-            if t["symbol"] == "UNCHARTED":
-                chart_wp(ship)
+
+    current_wp = {'symbol': ship_stats['data']['nav']['waypointSymbol'],
+                  'x': ship_stats['data']['nav']['route']['destination']['x'],
+                  'y': ship_stats['data']['nav']['route']['destination']['y']}
+    while len(waypoints) > 0:
+        closest_wp = waypoints[0]
+        closest_distance = dbFunctions.distance(current_wp, closest_wp)
+        for wp in waypoints:
+            d = dbFunctions.distance(current_wp, wp)
+            if d < closest_distance:
+                closest_wp = wp
+                closest_distance = d
+        charted = True
+        for t in closest_wp['traits']:
+            if t['symbol'] == "UNCHARTED":
+                charted = False
+        if not charted:
+            print("Closest uncharted waypoint to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance)
+            auto_nav(ship, closest_wp['symbol'])
+            c = chart_wp(ship)
+            if c:
                 chart_count += 1
+                wp_obj = Waypoint(c['data']['waypoint'])
+            else:
+                wp_obj = getWaypoint(system, closest_wp['symbol'])
+            dbFunctions.populate_waypoint(wp_obj)
+            for t2 in wp_obj.traits:
+                if t2["symbol"] == "MARKETPLACE":
+                    mark = otherFunctions.getMarket(closest_wp["systemSymbol"], closest_wp["symbol"])
+                    for good in mark["data"]["tradeGoods"]:
+                        if good["symbol"] == "FUEL":
+                            dock(ship)
+                            refuel(ship)
+                            orbit(ship)
+                            otherFunctions.patchShipNav(ship, "BURN")
+            current_wp = closest_wp
+        waypoints.remove(closest_wp)
     return chart_count
 
 
@@ -838,6 +858,7 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
                     while not lock.acquire():
                         time.sleep(1)
                     surveys.extend(gsc)
+                    update_material_values()
                     # print("NUM SURVEYS:", len(surveys))
                     lock.release()
                 time.sleep(cooldown)
@@ -848,17 +869,16 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
 
 
 material_values = {
-    "ALUMINUM_ORE": 80,
-    "AMMONIA_ICE": 38,
-    "COPPER_ORE": 76,
-    "ICE_WATER": 2,
-    "IRON_ORE": 62,
-    "PRECIOUS_STONES": 2,
-    "QUARTZ_SAND": 28,
-    "SILICON_CRYSTALS": 45
+    "ALUMINUM_ORE": 0,
+    "AMMONIA_ICE": 0,
+    "COPPER_ORE": 0,
+    "ICE_WATER": 0,
+    "IRON_ORE": 0,
+    "PRECIOUS_STONES": 0,
+    "QUARTZ_SAND": 0,
+    "SILICON_CRYSTALS": 0
 }
-avg = sum(material_values.values()) / len(material_values)
-last_hundred_survey_values = [avg for _ in range(100)]
+last_hundred_survey_values = [0 for _ in range(100)]
 
 
 def is_good(survey):
@@ -891,15 +911,23 @@ def survey_value(survey):
 
 def update_material_values():
     global material_values
-    market = otherFunctions.getMarket(SYSTEM, ASTEROIDS)
-    try:
-        trades = market["data"]["tradeGoods"]
-    except KeyError:
-        return False
-    for t in trades:
-        material_values[t["symbol"]] = t["sellPrice"]
+    for material in material_values.keys():
+        material_values[material] = 0
+    all_markets = dbFunctions.get_markets_from_access()
+    local_markets = []
+    for m in all_markets:
+        if SYSTEM in m['symbol']:
+            local_markets.append(m)
+    for market in local_markets:
+        for good in market['tradeGoods']:
+            if good['symbol'] not in material_values.keys():
+                material_values[good['symbol']] = good['sellPrice']
+            elif material_values[good['symbol']] < good['sellPrice']:
+                material_values[good['symbol']] = good['sellPrice']
     return True
 
+
+update_material_values()
 
 
 def jettison(ship):
@@ -1021,8 +1049,10 @@ def main():
 
 def main2():
     import hauling
-    for hauler in ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-24", "EKMON-25"]:
-        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(SYSTEM, hauler, ['FUEL', 'FAB_MATS']), daemon=True)
+    for hauler in ["EKMON-12", "EKMON-13", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37"]:
+        ship_stats = get_ship(hauler)
+        sys = ship_stats['data']['nav']['systemSymbol']
+        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(sys, hauler, []), daemon=True)
         x.start()
         time.sleep(5)
 
@@ -1030,6 +1060,67 @@ def main2():
         while True:
             time.sleep(100)
 
+def scout_markets(ship, need_to_chart = False):
+    if need_to_chart:
+        chart_system(ship)
+
+    ship_stats = get_ship(ship)
+    sys = ship_stats['data']['nav']['systemSymbol']
+    local_waypoints = dbFunctions.get_waypoints_from_access(sys)
+    markets = dbFunctions.find_all_with_trait_2(local_waypoints, "MARKETPLACE")
+
+    index = 0
+    while index < len(markets):
+        market_wp = markets[index]
+        current_time = datetime.now(timezone.utc)
+        marketplace = dbFunctions.access_get_market(market_wp['symbol'])
+        if len(marketplace) == 0:
+            markets.pop(index)
+        elif marketplace[0]['timeStamp'] is None:
+            index += 1
+        else:
+            market_time = marketplace[0]['timeStamp']
+            market_time = market_time.replace(tzinfo=timezone.utc)
+            time_diff = current_time-market_time
+            if time_diff > timedelta(hours=1):
+                index += 1
+            else:
+                markets.pop(index)
+
+
+    current_wp = {'symbol': ship_stats['data']['nav']['waypointSymbol'],
+                  'x': ship_stats['data']['nav']['route']['destination']['x'],
+                  'y': ship_stats['data']['nav']['route']['destination']['y']}
+    num_to_scout = len(markets)
+    print(ship, "has", num_to_scout, "market(s) to scout in system", sys)
+    while len(markets) > 0:
+        closest_wp = markets[0]
+        closest_distance = dbFunctions.distance(current_wp, closest_wp)
+        for m in markets:
+            d = dbFunctions.distance(current_wp, m)
+            if d < closest_distance:
+                closest_wp = m
+                closest_distance = d
+        print("Closest market to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance)
+        auto_nav(ship, closest_wp['symbol'])
+        otherFunctions.getMarket(sys, closest_wp['symbol'])
+        current_wp = closest_wp
+        markets.remove(closest_wp)
+
+    print(ship, "finished scouting", num_to_scout, "market(s) in system", sys)
+
+
+
+def main3():
+    scouts = ["EKMON-A", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37"]
+    threads = []
+    for scout in scouts:
+        x = threading.Thread(target=scout_markets, args=(scout, True), daemon=True)
+        x.start()
+        threads.append(x)
+    if __name__ == '__main__':
+        for x in threads:
+            x.join()
 
 init_globals()
 
@@ -1038,4 +1129,5 @@ if __name__ == '__main__':
     import faulthandler
     faulthandler.enable()
 
-    main()
+    main3()
+
