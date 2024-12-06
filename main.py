@@ -16,35 +16,30 @@ import database.dbFunctions as dbFunctions
 from database.Waypoint import Waypoint, getWaypoint
 
 SYSTEM = ""
-CONTRACT = ""
-ITEM = []
-ASTEROIDS = "X1-DP28-DC5X"
+ASTEROIDS = ""
+GAS_GIANT = ""
 SHIPYARD = ""
-DELIVERY = ""
+
 
 
 def init_globals():
     global SYSTEM
-    global CONTRACT
-    global ITEM
     global ASTEROIDS
     global SHIPYARD
-    global DELIVERY
+    global GAS_GIANT
 
     agent = otherFunctions.getAgent()
     hq = agent["data"]["headquarters"]
     hql = hq.split("-")
     SYSTEM = hql[0] + "-" + hql[1]
 
-    active_contracts = get_active_contracts(get_all_contracts(), False, False)
-    if len(active_contracts) > 0:
-        CONTRACT = active_contracts[0]["id"]
-        ITEM.append(active_contracts[0]["terms"]["deliver"][0]["tradeSymbol"])
-        DELIVERY = active_contracts[0]["terms"]["deliver"][0]["destinationSymbol"]
-    else:
-        CONTRACT = ""
-        DELIVERY = ""
-    waypoints_list = otherFunctions.getWaypoints(SYSTEM)["data"]
+    waypoints_list = dbFunctions.get_all_waypoints_in_system(SYSTEM)
+    for wp in waypoints_list:
+        if wp['type'] == "ENGINEERED_ASTEROID":
+            ASTEROIDS = wp['symbol']
+        elif wp['type'] == "GAS_GIANT":
+            GAS_GIANT = wp['symbol']
+
 
 
 def get_all_contracts():
@@ -368,33 +363,6 @@ def warp(ship, waypoint, warp_and_sleep=False, sleep_counter=True):
     return to_return
 
 
-def travel(ship, destination_waypoint, all_systems=None, sys_graph=None, limit_fuel=True, chart_while_traveling=False):
-    #TODO: finish writing this function
-    ship_obj = sleep_until_arrival(ship)
-    fuel = ship_obj["data"]["fuel"]["current"]
-    current_waypoint = ship_obj["data"]["nav"]["waypointSymbol"]
-    current_system = ship_obj["data"]["nav"]["systemSymbol"]
-    deconstructed_destination = destination_waypoint.split("-")
-    destination_system = deconstructed_destination[0] + "-" + deconstructed_destination[1]
-
-    if destination_system != current_system:
-        pass
-        #get graph, plot route
-        # if first is jump not warp, navigate to jump gate
-        # if any is warp, target a jump gate when applicable
-        # after jump/warp, if chart_while_travelling, chart system
-        # if waypoint is not the jump gate, navigate to jump gate
-
-    else:
-        if current_waypoint == destination_waypoint:
-            return
-        else:
-            navigate(ship, destination_waypoint, True)
-            return
-
-    # note to future: need to tell route plotter to ignore empty systems
-    return
-
 
 def max_speed(fuel, x1, y1, x2, y2):
     distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
@@ -545,73 +513,6 @@ def chart_wp(ship):
     endpoint = "v2/my/ships/" + ship + "/chart"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
 
-
-def shipLoop(ship, lock=None, surveys=None):
-    global DELIVERY
-    global ITEM
-    orbit(ship)
-    timeSinceLast = datetime.now()
-    while True:
-        new_time = datetime.now()
-        diff = new_time - timeSinceLast
-        # print(ship, diff)
-        timeSinceLast = new_time
-        try:
-            fullCargo = False
-            collected = None
-            capacity = None
-            extraction = None
-            try:
-                survey = None
-                if lock is not None and surveys is not None:
-                    while not lock.acquire():
-                        time.sleep(1)
-                    if len(surveys) > 0:
-                        survey = surveys.pop(0)
-                    lock.release()
-                extraction = dumb_extract(ship, survey)
-                print(ship + ": " + str(extraction))
-                c = extraction["data"]["cargo"]
-                capacity = c["capacity"]
-                collected = c["units"]
-            except TypeError:
-                fullCargo = True
-            if fullCargo or collected / capacity >= 0.67:
-                dock(ship)
-                c = sell_all(ship, ITEM)
-                capacity = c["capacity"]
-                collected = c["units"]
-                print(ship + ": " + str(collected) + "/" + str(capacity))
-                if collected / capacity >= 0.5:
-                    print(ship + ": " + str(refuel(ship)))
-                    orbit(ship)
-                    nav = navigate(ship, DELIVERY)
-                    print(ship + ": " + "En route to delivery")
-                    time.sleep(nav_to_time_delay(nav) + 1)
-                    dock(ship)
-                    delivery = deliver(ship, ITEM[0], collected, CONTRACT)
-                    if delivery["data"]["contract"]["terms"]["deliver"][0]["unitsRequired"] == \
-                            delivery["data"]["contract"]["terms"]["deliver"][0]["unitsFulfilled"]:
-                        ITEM.pop(0)
-                        otherFunctions.fulfillContract(CONTRACT)
-                    print(ship + ": " + str(delivery))
-                    print(ship + ": " + str(refuel(ship)))
-                    orbit(ship)
-                    nav = navigate(ship, ASTEROIDS)
-                    print(ship + ": " + "En route to asteroids")
-                    time.sleep(nav_to_time_delay(nav) + 1)
-                    print(ship + ": " + "Returned to asteroids")
-                else:
-                    orbit(ship)
-                    cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
-                    time.sleep(cooldown)
-            else:
-                cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
-                time.sleep(cooldown)
-        except TypeError:
-            print(ship + ": ****************************ERROR************************")
-            orbit(ship)
-            time.sleep(60)
 
 
 def minerLoop(ship, lock=None, surveys=None):
@@ -963,68 +864,6 @@ def ships_to_names(ships):
     return names
 
 
-def ore_hound_thread_spawner(lock=None, surveys=None, max_hounds=30, max_surveys=100):
-    #TODO: spawn survey ships up to 20% of the number of ore hounds
-    import buyShip
-    new_threads = []
-
-    all_ships = get_all_ships()
-
-    survey_mounts = ["MOUNT_SURVEYOR_I",
-                     "MOUNT_SURVEYOR_II",
-                     "MOUNT_SURVEYOR_III"
-                     ]
-    mining_mounts = ["MOUNT_MINING_LASER_I",
-                     "MOUNT_MINING_LASER_II",
-                     "MOUNT_MINING_LASER_III"]
-
-    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts, survey_mounts))
-    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts, mining_mounts))
-
-    num_hounds = len(mining_ships)
-    num_surveyors = len(survey_ships)
-
-    surveyors_per_miner = 0.2
-    max_surveyors = max_hounds * surveyors_per_miner
-
-    while num_hounds < max_hounds or num_surveyors < max_surveyors:
-        agent = otherFunctions.getAgent()
-        credits = agent["data"]["credits"]
-        shipyard = buyShip.getShipyard()
-        ships = shipyard["data"]["ships"]
-        ore_hound = None
-        for ship in ships:
-            if ship["type"] == "SHIP_ORE_HOUND":
-                ore_hound = ship
-        ore_hound_price = ore_hound["purchasePrice"]
-        market = otherFunctions.getMarket(SYSTEM, SHIPYARD)
-        goods = market["data"]["tradeGoods"]
-        mount_price = None
-        for good in goods:
-            if good["symbol"] == "MOUNT_MINING_LASER_II":
-                mount_price = good["purchasePrice"] * 2
-
-        total_price = ore_hound_price + mount_price + 8000
-        print("***")
-        print("CREDITS:", credits)
-        print("COST:", total_price)
-        print("***")
-        if credits > total_price:
-            if num_surveyors < num_hounds * surveyors_per_miner:
-                new_ship = buyShip.buySurveyHound()
-                new_thread = threading.Thread(target=survey_loop, args=(new_ship, lock, surveys, max_surveys), daemon=True)
-                new_threads.append(new_thread)
-                new_thread.start()
-                num_surveyors += 1
-            else:
-                new_ship = buyShip.buyOreHound()
-                new_thread = threading.Thread(target=shipLoop, args=(new_ship, lock, surveys), daemon=True)
-                new_threads.append(new_thread)
-                new_thread.start()
-                print("New Ship:", new_ship)
-                num_hounds += 1
-
-        time.sleep(600)
 
 
 def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
@@ -1372,3 +1211,26 @@ if __name__ == '__main__':
     main()
 
 
+"""
+
+EKMON-25 and EKMON-2F to X1-BN96-I58
+EKMON-34 and EKMON-30 to X1-GQ86-C10B
+EKMON-35 and EKMON-31 to X1-DX47-ZC7C
+EKMON-36 and EKMON-32 to X1-QC60-X11Z
+EKMON-37 and EKMON-33 to X1-A55-EX7F
+
+"""
+
+"""
+3E -> GA24 <- 47, 48
+3F -> HX47 <- 49, 4A, 4B, 4C
+      DM36 <- 55, 56, 57, 58
+42 -> NU95 <- 4D, 4E, 4F, 50
+43 -> US85 (Arriving tonight 10pm)
+44 -> SB74 (Arriving Sunday 8pm)
+45 -> FZ33 <- 51, 52
+46 -> KM9 (Arriving Sunday 7am))
+40 -> XU25 (Obsidian) (Arriving Saturday 1pm)
+53 -> GU77 (Arriving Saturday 6pm)
+54 -> QY94 (Arriving Saturday 7pm)
+"""
