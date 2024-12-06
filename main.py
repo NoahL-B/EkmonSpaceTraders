@@ -78,12 +78,24 @@ def get_active_contracts(all_contracts, accept_unaccepted=False, include_unaccep
     return active_contracts
 
 
+def refine(ship, item_to_produce):
+    endpoint = "v2/my/ships/" + ship + "/refine"
+    params = {"produce": item_to_produce}
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
 def extract(ship, survey=None):
     endpoint = "v2/my/ships/" + ship + "/extract"
     params = None
     if survey is not None:
         params = {"survey": json.dumps(survey)}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
+
+def siphon(ship):
+    endpoint = "v2/my/ships/" + ship + "/siphon"
+    params = None
+    return myClient.generic_api_call("POST", endpoint, params, TOKEN)
+
 
 
 def dumb_extract(ship, survey=None):
@@ -204,6 +216,9 @@ def auto_nav(ship, destination):
     system = ship_stats['data']['nav']['systemSymbol']
     origin = ship_stats['data']['nav']['waypointSymbol']
     status = ship_stats['data']['nav']['status']
+    fuel = ship_stats['data']['fuel']['current']
+    fuel_cap = ship_stats['data']['fuel']['capacity']
+
     if status == "DOCKED":
         orbit(ship)
     elif status == "IN_TRANSIT":
@@ -214,28 +229,45 @@ def auto_nav(ship, destination):
     if ship_stats['data']['registration']['role'] == "SATELLITE":
         navigate(ship, destination, True)
         return
-    if ship_stats['data']['nav']['flightMode'] == "DRIFT":
-        navigate(ship, destination, True)
-        return
+
 
     all_waypoints = dbFunctions.get_waypoints_from_access(system)
 
     origin_in_access = False
     destination_in_access = False
 
+    origin_wp = None
+    destination_wp = None
+
     for wp in all_waypoints:
         if not origin_in_access:
             if wp['symbol'] == origin:
                 origin_in_access = True
+                origin_wp = wp
         if not destination_in_access:
             if wp['symbol'] == destination:
                 destination_in_access = True
+                destination_wp = wp
+
+    if ship_stats['data']['nav']['flightMode'] == "DRIFT":
+        origin_market = False
+        destination_market = False
+        for t in origin_wp['traits']:
+            if t['symbol'] == "MARKETPLACE":
+                origin_market = True
+        for t in destination_wp['traits']:
+            if t['symbol'] == "MARKETPLACE":
+                destination_market = True
+        if origin_market and not destination_market and fuel < fuel_cap:
+            dock(ship)
+            refuel(ship)
+            orbit(ship)
+        navigate(ship, destination, True)
+        return
 
     if not origin_in_access or not destination_in_access:
         all_waypoints = dbFunctions.get_all_waypoints_in_system(system)
 
-    fuel = ship_stats['data']['fuel']['current']
-    fuel_cap = ship_stats['data']['fuel']['capacity']
 
     burn = ship_stats['data']['nav']['flightMode'] == "BURN"
 
@@ -244,6 +276,18 @@ def auto_nav(ship, destination):
 
     path = waypointGraphing.dij_path(dij_graph, origin, destination)
 
+    if path is None:
+        start_speed = ship_stats['data']['nav']['flightMode']
+        if start_speed == "BURN":
+            new_speed = "CRUISE"
+        else:
+            new_speed = "DRIFT"
+        print("Slowing down", ship, "to", new_speed, "speed")
+        otherFunctions.patchShipNav(ship, new_speed)
+        auto_nav(ship, destination)
+        print("Returning", ship, "to", start_speed, "speed")
+        otherFunctions.patchShipNav(ship, start_speed)
+        return
 
     waypoint_num = 0
 
@@ -251,15 +295,33 @@ def auto_nav(ship, destination):
 
         fuel_required = path.edges[waypoint_num] % 10000
         fueled_up = True
+
+        this_wp_market = False
+        next_wp_market = False
+        for wp in all_waypoints:
+            if wp['symbol'] == path.nodes[waypoint_num]:
+                for t in wp['traits']:
+                    if t['symbol'] == "MARKETPLACE":
+                        this_wp_market = True
+            if wp['symbol'] == path.nodes[waypoint_num + 1]:
+                for t in wp['traits']:
+                    if t['symbol'] == "MARKETPLACE":
+                        next_wp_market = True
+
+        if not next_wp_market:
+            fueled_up = False
+
+        if fuel == fuel_cap:
+            fueled_up = True
+
         if fuel_required > fuel:
             fueled_up = False
-            for wp in all_waypoints:
-                if wp['symbol'] == path.nodes[waypoint_num]:
-                    for t in wp['traits']:
-                        if t['symbol'] == "MARKETPLACE":
-                            dock(ship)
-                            fueled_up = refuel(ship)
-                            orbit(ship)
+
+        if not fueled_up and this_wp_market:
+            dock(ship)
+            fueled_up = refuel(ship)
+            orbit(ship)
+
         if fueled_up:
             nav = navigate(ship, path.nodes[waypoint_num + 1], True)
             fuel = nav['data']['fuel']['current']
@@ -428,6 +490,18 @@ def chart_system(ship, system=None, limit_fuel=True):
     waypoints = dbFunctions.get_waypoints_from_access(system)
     chart_count = 0
 
+    i = 0
+    while i < len(waypoints):
+        traits = waypoints[i]['traits']
+        charted = True
+        for t in traits:
+            if t['symbol'] == "UNCHARTED":
+                charted = False
+        if charted:
+            waypoints.pop(i)
+        else:
+            i += 1
+
     current_wp = {'symbol': ship_stats['data']['nav']['waypointSymbol'],
                   'x': ship_stats['data']['nav']['route']['destination']['x'],
                   'y': ship_stats['data']['nav']['route']['destination']['y']}
@@ -444,7 +518,7 @@ def chart_system(ship, system=None, limit_fuel=True):
             if t['symbol'] == "UNCHARTED":
                 charted = False
         if not charted:
-            print("Closest uncharted waypoint to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance)
+            print("Closest uncharted waypoint to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance, "(with", len(waypoints), "waypoints left, inclusive)")
             auto_nav(ship, closest_wp['symbol'])
             c = chart_wp(ship)
             if c:
@@ -560,7 +634,8 @@ def minerLoop(ship, lock=None, surveys=None):
             if not extraction:
                 print(ship + ": " + str(extraction))
             elif extraction['data']['extraction']['yield']['units'] >= 0:
-                print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
+                # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
+                pass
 
             cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
             time.sleep(cooldown)
@@ -570,6 +645,44 @@ def minerLoop(ship, lock=None, surveys=None):
             orbit(ship)
             time.sleep(70)
 
+
+def siphonLoop(ship):
+    orbit(ship)
+    timeSinceLast = datetime.now()
+    ship_stats = get_ship(ship)
+    capacity = ship_stats['data']['cargo']['capacity']
+    inventory = ship_stats['data']['cargo']['units']
+    while True:
+        if capacity == inventory:
+            time.sleep(20)
+            ship_stats = get_ship(ship)
+            inventory = ship_stats['data']['cargo']['units']
+        elif capacity < inventory:
+            ship_stats = get_ship(ship)
+            inventory = ship_stats['data']['cargo']['units']
+        else:
+            new_time = datetime.now()
+            diff = new_time - timeSinceLast
+            # print(ship, diff)
+            timeSinceLast = new_time
+            try:
+                extraction = siphon(ship)
+                cooldown = 60
+                if extraction:
+                    cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
+                    num_units = extraction['data']['siphon']['yield']['units']
+                    if num_units >= 0:
+                        # print(ship + ": Siphoned " + str(extraction['data']['siphon']['yield']['units']) + " " + extraction['data']['siphon']['yield']['symbol'])
+                        inventory += num_units
+                else:
+                    print(ship + ": " + str(extraction))
+
+                time.sleep(cooldown)
+            except TypeError as e:
+                print(ship + ": ****************************ERROR************************")
+                print(e)
+                orbit(ship)
+                time.sleep(70)
 def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None,
                jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None,
                jump_nav_systems_to_destination=None, item=None, destination=None, required=None, fulfilled=None,
@@ -637,20 +750,19 @@ def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_ori
     return not too_expensive
 
 
-def haulerLoopB(hauling_ship, mining_ships, lock):
+def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_ships=None):
     hauler = hauling_ship
-
     excavators = mining_ships
-
-    asteroid = "X1-DP28-DC5X"
-
     hauling.sell_off_existing_cargo(hauler)
 
+    refinable_ores = []
+    if refining_ships:
+        refinable_ores = ['IRON_ORE', "COPPER_ORE", "ALUMINUM_ORE", "SILVER_ORE", "GOLD_ORE", "PLATINUM_ORE", "URANITE_ORE", "MERITUM_ORE"]
 
     while True:
         try:
 
-            auto_nav(hauler, asteroid)
+            auto_nav(hauler, collection_waypoint)
 
             ship = get_ship(hauler)
             capacity = ship['data']['cargo']['capacity']
@@ -658,47 +770,131 @@ def haulerLoopB(hauling_ship, mining_ships, lock):
 
             full = capacity == inventory_size
 
-            try:
-
-                while not lock.acquire():
-                    time.sleep(1)
-
-                while not full:
-
+            while not full:
+                try:
+                    lock.acquire()
                     for e in excavators:
                         if capacity > inventory_size:
                             result = cargo(e)
                             inventory = result['data']['inventory']
 
                             for i in inventory:
-                                num_units = i['units']
-                                if num_units > capacity - inventory_size:
-                                    num_units = capacity - inventory_size
-                                if num_units > 0:
-                                    otherFunctions.transfer(e, hauler, i['symbol'], num_units)
-                                    inventory_size += num_units
+                                if i['symbol'] not in refinable_ores:
+                                    num_units = i['units']
+                                    if num_units > capacity - inventory_size:
+                                        num_units = capacity - inventory_size
+                                    if num_units > 0:
+                                        otherFunctions.transfer(e, hauler, i['symbol'], num_units)
+                                        inventory_size += num_units
+                finally:
+                    lock.release()
 
-                    c = cargo(hauler)['data']
-                    if c['units'] > 0:
-                        print(hauler + ': ' + str(c))
-
-
-                    full = c['units'] >= capacity * 0.9
-                    if not full:
-                        sleep_time = random.randint(10, 20)
-                        time.sleep(sleep_time)
+                time.sleep(30)
 
 
-            finally:
-                lock.release()
+                c = cargo(hauler)['data']
+                if c['units'] > 0:
+                    pass  # print(hauler + ': ' + str(c))
 
+                full = c['units'] >= capacity * 0.9
 
-            print("Thing 1", hauler)
+            lock.acquire()
+            lock.release()
             hauling.sell_off_existing_cargo(hauler)
-            print("Thing 2", hauler)
 
         except TypeError:
             time.sleep(60)
+
+
+def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
+
+    asteroid = "X1-DP28-DC5X"
+
+    basic_to_processed_goods = {
+        "IRON_ORE": "IRON",
+        "COPPER_ORE": "COPPER",
+        "ALUMINUM_ORE": "ALUMINUM",
+        "SILVER_ORE": "SILVER",
+        "GOLD_ORE": "GOLD",
+        "PLATINUM_ORE": "PLATINUM",
+        "URANITE_ORE": "URANITE",
+        "MERITUM_ORE": "MERITUM"
+    }
+
+    while True:
+        try:
+            auto_nav(refining_ship, asteroid)
+
+            ship = get_ship(refining_ship)
+            capacity = ship['data']['cargo']['capacity']
+            inventory_size = ship['data']['cargo']['units']
+
+            try:
+                hauling_lock.acquire()
+
+                for s in hauling_ships + extraction_ships:
+                    if capacity > inventory_size:
+
+                        result = get_ship(s)
+                        waypoint = result['data']['nav']['waypointSymbol']
+                        nav_status = result['data']['nav']['status']
+                        if waypoint == asteroid and nav_status == "IN_ORBIT":
+                            inventory = result['data']['cargo']['inventory']
+
+                            for i in inventory:
+                                if i['symbol'] in basic_to_processed_goods.keys():
+                                    num_units = i['units']
+                                    if num_units > capacity - inventory_size:
+                                        num_units = capacity - inventory_size
+                                    if num_units > 0:
+                                        otherFunctions.transfer(s, refining_ship, i['symbol'], num_units)
+                                        inventory_size += num_units
+            finally:
+                hauling_lock.release()
+
+            ship = get_ship(refining_ship)
+            processed_goods = []
+            if ship['data']['cooldown']['remainingSeconds'] == 0:
+                cooldown = False
+                for i in ship['data']['cargo']['inventory']:
+                    symbol = i['symbol']
+                    if symbol in basic_to_processed_goods.keys():
+                        if not cooldown and i['units'] > 100:
+                            r = refine(refining_ship, basic_to_processed_goods[symbol])
+                            if r:
+                                refined_item = r['data']['produced'][0]
+                                print(refining_ship, "refined something:", r['data'])
+                                print(refining_ship, "now has cargo:", r['data']['cargo'])
+                                processed_goods.append(refined_item)
+                                cooldown = True
+                    else:
+                        processed_goods.append(i)
+
+            if processed_goods:
+                try:
+                    hauling_lock.acquire()
+
+                    for h in hauling_ships:
+                        if processed_goods:
+                            result = get_ship(h)
+                            waypoint = result['data']['nav']['waypointSymbol']
+                            nav_status = result['data']['nav']['status']
+                            if waypoint == asteroid and nav_status == "IN_ORBIT":
+                                empty_space = result['data']['cargo']['capacity'] - result['data']['cargo']['units']
+                                while processed_goods and empty_space > 0:
+                                    i = processed_goods.pop()
+                                    num_to_transfer = min(empty_space, i['units'])
+                                    t = otherFunctions.transfer(refining_ship, h, i['symbol'], num_to_transfer)
+                                    print("Transfered refined goods back to haulers:", t)
+                                    empty_space -= num_to_transfer
+                finally:
+                    hauling_lock.release()
+
+            time.sleep(10)
+
+        except TypeError as e:
+            raise e
+            #time.sleep(60)
 
 
 def get_all_ships():
@@ -985,8 +1181,12 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
 
 def main():
     all_ships = get_all_ships()
-    if all_ships[0]['symbol'] == "EKMON-1":
-        all_ships.pop(0)
+    to_remove = []
+    for s in all_ships:
+        if s['symbol'] in ["EKMON-1", "EKMON-41"]:
+            to_remove.append(s)
+    for s in to_remove:
+        all_ships.remove(s)
 
     survey_mounts = ["MOUNT_SURVEYOR_I",
                      "MOUNT_SURVEYOR_II",
@@ -996,8 +1196,31 @@ def main():
                      "MOUNT_MINING_LASER_II",
                      "MOUNT_MINING_LASER_III"]
 
+    siphon_mounts = ["MOUNT_GAS_SIPHON_I",
+                     "MOUNT_GAS_SIPHON_II",
+                     "MOUNT_GAS_SIPHON_III"]
+
     mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts))
     survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts))
+    siphon_ships = ships_to_names(get_ships_by_mounts(all_ships, siphon_mounts))
+    explorers = ships_to_names(get_ships_by_frame(all_ships, "FRAME_EXPLORER"))
+
+    i = 0
+    while i < len(mining_ships):
+        if mining_ships[i] in siphon_ships:
+            siphon_ships.remove(mining_ships[i])
+        if mining_ships[i] in survey_ships:
+            if len(mining_ships) > 2.5 * len(survey_ships):
+                mining_ships.pop(i)
+            else:
+                survey_ships.remove(mining_ships[i])
+                i += 1
+        else:
+            i += 1
+
+    for e in explorers:
+        if e in siphon_ships:
+            siphon_ships.remove(e)
 
     threads = []
     survey_lock = threading.Lock()
@@ -1005,16 +1228,36 @@ def main():
 
     max_num_surveys = min(100, 2*len(mining_ships))
 
-    collection_lock = threading.Lock()
+    mining_collection_lock = threading.Lock()
+    siphon_collection_lock = threading.Lock()
 
-    for hauler in ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13", "EKMON-24", "EKMON-25"]:
-        x = threading.Thread(target=haulerLoopB, args=(hauler, mining_ships, collection_lock), daemon=True)
+    asteroid_haulers = ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13"]
+    gas_giant_haulers = ["EKMON-3C", "EKMON-3D"]
+    trade_haulers = ["EKMON-24", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37", "EKMON-47", "EKMON-48", "EKMON-49", "EKMON-4A", "EKMON-4B", "EKMON-4C", "EKMON-4D", "EKMON-4E", "EKMON-4F", "EKMON-50", "EKMON-51", "EKMON-52", "EKMON-55", "EKMON-56", "EKMON-57", "EKMON-58"]
+    refineries = []
+
+    for hauler in asteroid_haulers:
+        x = threading.Thread(target=haulerLoopB, args=(hauler, mining_ships, mining_collection_lock, ASTEROIDS), daemon=True)
+        threads.append(x)
+        x.start()
+
+    for refinery in refineries:
+        x = threading.Thread(target=refinerLoop, args=(refinery, mining_ships, asteroid_haulers, mining_collection_lock), daemon=True)
+        threads.append(x)
+        x.start()
+
+    for hauler in gas_giant_haulers:
+        x = threading.Thread(target=haulerLoopB, args=(hauler, siphon_ships, siphon_collection_lock, "X1-DP28-C38"), daemon=True)
         threads.append(x)
         x.start()
 
 
-    for hauler in []:  # ["EKMON-24", "EKMON-25"]:
-        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(SYSTEM, hauler, ['FUEL', 'FAB_MATS']), daemon=True)
+    for hauler in trade_haulers:
+        system = None
+        for s in all_ships:
+            if s['symbol'] == hauler:
+                system = s['nav']['systemSymbol']
+        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(system, hauler, []), daemon=True)
         threads.append(x)
         x.start()
 
@@ -1022,34 +1265,30 @@ def main():
         x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys, max_num_surveys), daemon=True)
         threads.append(x)
         x.start()
-        print("surveyor started!", surveyor)
+        # print("surveyor started!", surveyor)
 
-    if len(surveys) < 1 and len(survey_ships) > 0:
-        print("Waiting", end="")
-    while len(surveys) < 1 and len(survey_ships) > 0:
-        print(".", end="")
-        time.sleep(1)
-    time.sleep(len(survey_ships) + 1)
 
     for drone in mining_ships:
         x = threading.Thread(target=minerLoop, args=(drone, survey_lock, surveys), daemon=True)
         threads.append(x)
         x.start()
-        print("miner started!", drone)
+        # print("miner started!", drone)
 
-    #x = threading.Thread(target=ore_hound_thread_spawner, args=(survey_lock, surveys, 40, max_num_surveys), daemon=True)
-    #threads.append(x)
-    #x.start()
+    for drone in siphon_ships:
+        x = threading.Thread(target=siphonLoop, args=(drone,), daemon=True)
+        threads.append(x)
+        x.start()
 
     if __name__ == '__main__':
         while True:
-            time.sleep(100)
+            main3()
+            time.sleep(1000)
     return threads
 
 
 def main2():
     import hauling
-    for hauler in ["EKMON-12", "EKMON-13", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37"]:
+    for hauler in ["EKMON-12", "EKMON-13", "EKMON-25"]:
         ship_stats = get_ship(hauler)
         sys = ship_stats['data']['nav']['systemSymbol']
         x = threading.Thread(target=hauling.choose_trade_run_loop, args=(sys, hauler, []), daemon=True)
@@ -1060,7 +1299,7 @@ def main2():
         while True:
             time.sleep(100)
 
-def scout_markets(ship, need_to_chart = False):
+def scout_markets(ship, need_to_chart = True):
     if need_to_chart:
         chart_system(ship)
 
@@ -1082,7 +1321,7 @@ def scout_markets(ship, need_to_chart = False):
             market_time = marketplace[0]['timeStamp']
             market_time = market_time.replace(tzinfo=timezone.utc)
             time_diff = current_time-market_time
-            if time_diff > timedelta(hours=1):
+            if time_diff > timedelta(hours=4):
                 index += 1
             else:
                 markets.pop(index)
@@ -1101,7 +1340,7 @@ def scout_markets(ship, need_to_chart = False):
             if d < closest_distance:
                 closest_wp = m
                 closest_distance = d
-        print("Closest market to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance)
+        print("Closest market to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance, "(with", len(markets), "markets left, inclusive)")
         auto_nav(ship, closest_wp['symbol'])
         otherFunctions.getMarket(sys, closest_wp['symbol'])
         current_wp = closest_wp
@@ -1112,7 +1351,7 @@ def scout_markets(ship, need_to_chart = False):
 
 
 def main3():
-    scouts = ["EKMON-A", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37"]
+    scouts = ["EKMON-2F", "EKMON-2", "EKMON-38", "EKMON-3E", "EKMON-3F", "EKMON-40", "EKMON-42", "EKMON-43", "EKMON-44", "EKMON-45", "EKMON-46"]
     threads = []
     for scout in scouts:
         x = threading.Thread(target=scout_markets, args=(scout, True), daemon=True)
@@ -1122,6 +1361,7 @@ def main3():
         for x in threads:
             x.join()
 
+
 init_globals()
 
 if __name__ == '__main__':
@@ -1129,5 +1369,6 @@ if __name__ == '__main__':
     import faulthandler
     faulthandler.enable()
 
-    main3()
+    main()
+
 

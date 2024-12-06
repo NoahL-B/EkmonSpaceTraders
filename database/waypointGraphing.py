@@ -20,10 +20,9 @@ def make_dij_graph(all_waypoints, fuel_capacity, burn=True):
                 if dist * (1 + burn) < fuel_capacity - 1:
                     if burn:
                         dist *= 2
-                    if not w1_has_market:
-                        dist += 10000
-                    if not w2_has_market:
-                        dist += 10000
+                    if dist > 2:
+                        if not w1_has_market:
+                            dist += 10000 * round(dist)
                     dij.add_edge(w1["symbol"], w2["symbol"], dist)
     return dij
 

@@ -453,6 +453,9 @@ def choose_trade_run_loop(system, ship, ignored_goods=('FUEL',)):
                     highest_diff_item = item
 
         item = highest_diff_item
+        if item == "":
+            print(ship, "has no profitable trades available.")
+            return
         origin = price_diffs[item][0]
         destination = price_diffs[item][1]
 
@@ -495,11 +498,11 @@ if __name__ == '__main__':
     e = "EKMON-24"
     f = "EKMON-25"
 
-    # main_2(b)
-    sell_off_existing_cargo(a)
+    # main_2(e)
+    # sell_off_existing_cargo(a)
     # sell_off_existing_cargo(b)
-    sell_off_existing_cargo(c)
-    sell_off_existing_cargo(d)
-    sell_off_existing_cargo(e)
-    sell_off_existing_cargo(f)
-    choose_trade_run_loop(SYSTEM, d, ['FUEL', 'FAB_MATS'])
+    # sell_off_existing_cargo(c)
+    # sell_off_existing_cargo(d)
+    # sell_off_existing_cargo(e)
+    # sell_off_existing_cargo(f)
+    choose_trade_run_loop("X1-BN96", f, [])
