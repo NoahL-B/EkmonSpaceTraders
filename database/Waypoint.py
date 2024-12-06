@@ -13,6 +13,7 @@ class Waypoint:
         self.faction = None
         self.traits = None
         self.chart = None
+        self.isUnderConstruction = None
 
         if data is not None:
             self.update(data)
@@ -24,6 +25,7 @@ class Waypoint:
         self.systemSymbol = waypoint["systemSymbol"]
         self.x = waypoint["x"]
         self.y = waypoint["y"]
+        self.isUnderConstruction = waypoint["isUnderConstruction"]
         self.orbitals = waypoint["orbitals"]
         if "faction" in waypoint.keys():
             self.faction = waypoint["faction"]
@@ -41,7 +43,8 @@ class Waypoint:
             "orbitals": self.orbitals,
             "faction": self.faction,
             "traits": self.traits,
-            "chart": self.chart
+            "chart": self.chart,
+            "isUnderConstruction": self.isUnderConstruction
         }
         return data
 

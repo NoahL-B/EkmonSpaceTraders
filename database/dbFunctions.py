@@ -28,6 +28,8 @@ def waypoint_to_sql(wp, update_not_insert=False):
     if wp.faction is not None:
         cmd += ", faction"
 
+    cmd += ", isUnderConstruction"
+
     for t in wp.traits:
         trait_symbol = t["symbol"]
         cmd += ", " + trait_symbol
@@ -37,6 +39,8 @@ def waypoint_to_sql(wp, update_not_insert=False):
 
     if wp.faction is not None:
         cmd += ", '" + wp.faction["symbol"] + "'"
+
+    cmd += ", " + str(wp.isUnderConstruction)
 
     for _ in wp.traits:
         cmd += ", True"
@@ -56,6 +60,11 @@ def waypoint_to_sql_2(wp):
         return False
 
     cmd = 'UPDATE Waypoint SET Waypoint.UNCHARTED=False'
+
+    if wp.isUnderConstruction:
+        cmd += ", Waypoint.isUnderConstruction=True"
+    else:
+        cmd += ", Waypoint.isUnderConstruction=False"
 
     if wp.faction is not None:
         cmd += ", Waypoint.faction='" + wp.faction["symbol"] + "'"
@@ -429,17 +438,17 @@ def get_waypoints_from_access(system=None):
                 if faction is not None and faction != "":
                     dict_wp["faction"] = faction
 
-                for trait_num in range(6, 75):
+                for trait_num in range(7, 76):
                     if raw_wp[trait_num]:
                         trait_name = raw_wp.cursor_description[trait_num][0]
                         traits.append({"symbol": trait_name})
 
-                if raw_wp[75] is not None:
+                if raw_wp[76] is not None:
                     chart = {
-                        "waypointSymbol": raw_wp[75],
-                        "submittedBy": raw_wp[76],
-                        "submittedOn": raw_wp[77],
-                        "submittedByAgent": raw_wp[78]
+                        "waypointSymbol": raw_wp[76],
+                        "submittedBy": raw_wp[77],
+                        "submittedOn": raw_wp[78],
+                        "submittedByAgent": raw_wp[79]
                     }
                     dict_wp["chart"] = chart
 
