@@ -30,13 +30,18 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
             return
 
         if stop_on_unprofitable_origin:
-            if origin_target_good['type'] == 'IMPORT':
-                print("Unprofitable origin: product is an IMPORT")
-                return
+            if type(stop_on_unprofitable_origin) is bool:
+                if origin_target_good['type'] == 'IMPORT':
+                    print("Unprofitable origin: product is an IMPORT")
+                    return
 
-            if origin_target_good['supply'] not in ['ABUNDANT', 'HIGH', 'MODERATE']:
-                print("Unprofitable origin: supply is too low")
-                return
+                if origin_target_good['supply'] not in ['ABUNDANT', 'HIGH', 'MODERATE']:
+                    print("Unprofitable origin: supply is too low")
+                    return
+            else:
+                if origin_target_good['purchasePrice'] < stop_on_unprofitable_origin:
+                    print("Unprofitable origin: product is too expensive")
+
 
         num_to_buy = capacity - cargo['units']
         trade_volume = origin_target_good['tradeVolume']
@@ -411,10 +416,12 @@ def choose_trade_loop(system, ship, ignored_goods=('FUEL',)):
 
 
 
-def choose_trade_run_loop(system, ship, ignored_goods=('FUEL',)):
+def choose_trade_run_loop(system, ship, ignored_goods=('FUEL',), loop=True):
     sell_off_existing_cargo(ship)
+    do_once = True
 
-    while True:
+    while do_once or loop:
+        do_once = False
         all_markets = dbFunctions.get_markets_from_access()
         local_markets = []
         for marketplace in all_markets:

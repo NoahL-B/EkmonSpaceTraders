@@ -42,7 +42,7 @@ def copy_old_data():
 
 
 def clear_db():
-    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts"]:
+    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts", "ShipAssignments"]:
         cmd = "DELETE FROM {};".format(table_name) # noqa
         cursor.execute(cmd)
 

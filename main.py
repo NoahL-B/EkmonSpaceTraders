@@ -5,7 +5,6 @@ import threading
 import json
 from datetime import datetime, timedelta, timezone
 
-import hauling
 from SECRETS import TOKEN
 from SHARED import myClient
 
@@ -18,14 +17,12 @@ from database.Waypoint import Waypoint, getWaypoint
 SYSTEM = ""
 ASTEROIDS = ""
 GAS_GIANT = ""
-SHIPYARD = ""
 
 
 
 def init_globals():
     global SYSTEM
     global ASTEROIDS
-    global SHIPYARD
     global GAS_GIANT
 
     agent = otherFunctions.getAgent()
@@ -78,6 +75,7 @@ def refine(ship, item_to_produce):
     params = {"produce": item_to_produce}
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
+
 def extract(ship, survey=None):
     endpoint = "v2/my/ships/" + ship + "/extract"
     params = None
@@ -121,6 +119,11 @@ def dock(ship):
 def orbit(ship):
     endpoint = "v2/my/ships/" + ship + "/orbit"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
+
+
+
+import buyShip
+
 
 
 def cargo(ship):
@@ -403,6 +406,7 @@ def get_construction(system, waypoint):
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
+
 def refuel(ship):
     endpoint = "v2/my/ships/" + ship + "/refuel"
     return myClient.generic_api_call("POST", endpoint, None, TOKEN)
@@ -452,7 +456,7 @@ def sleep_until_arrival(ship, sleep_counter=False):
     return ship_data
 
 
-def chart_system(ship, system=None, limit_fuel=True):
+def chart_system(ship):
     ship_stats = get_ship(ship)
     system = ship_stats['data']['nav']['systemSymbol']
     waypoints = dbFunctions.get_waypoints_from_access(system)
@@ -584,6 +588,8 @@ def siphonLoop(ship):
                 print(e)
                 orbit(ship)
                 time.sleep(70)
+
+
 def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None,
                jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None,
                jump_nav_systems_to_destination=None, item=None, destination=None, required=None, fulfilled=None,
@@ -649,6 +655,9 @@ def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_ori
                 too_expensive = True
 
     return not too_expensive
+
+
+import hauling
 
 
 def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_ships=None):
@@ -796,6 +805,201 @@ def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
         except TypeError as e:
             raise e
             #time.sleep(60)
+
+
+def explorationRun(ship, destination_system, shipyard_waypoint):
+    import buyShip
+    ship_stats = get_ship(ship)
+    if ship_stats['data']['nav']['status'] == "DOCKED":
+        orbit(ship)
+    elif ship_stats['data']['nav']['status'] == "IN_TRANSIT":
+        sleep_until_arrival(ship)
+
+    if ship_stats['data']['nav']['systemSymbol'] != destination_system:
+        otherFunctions.patchShipNav(ship, "DRIFT")
+        warp(ship, shipyard_waypoint, False, False)
+        otherFunctions.patchShipNav(ship, "BURN")
+        sleep_until_arrival(ship)
+    elif ship_stats['data']['nav']['waypointSymbol'] != shipyard_waypoint:
+        auto_nav(ship, shipyard_waypoint)
+
+    ship_roles = dbFunctions.get_ship_roles_from_access()
+    hauler_count = 0
+    for s in ship_roles:
+        if s['hasAssignment'] and s['assignmentType'] == "TRADE_HAULER" and s['systemSymbol'] == destination_system:
+            hauler_count += 1
+
+    while hauler_count < 3:
+        new_ship_name = buyShip.buyLightHauler(shipyard_waypoint)
+        dbFunctions.access_add_ship_assignment(new_ship_name, True, "TRADE_HAULER", destination_system)
+        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(destination_system, new_ship_name, []), daemon=True)
+        x.start()
+        hauler_count += 1
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="MARKET_SCOUT")
+
+
+def commandPhaseA(ship):
+    # Initial funds to get 10 miner, 3 asteroid hauler, 3 surveyors, 2 siphons, 2 siphon haulers, 4 trade haulers
+    ship_assignments = dbFunctions.get_ship_roles_from_access()
+    ships_desired = {
+        "MINING_SHIP": 1,
+        "ASTEROID_HAULER": 1,
+        "SURVEYOR": 1,
+        "TRADE_HAULER": 1,
+        "SIPHON_SHIP": 1,
+        "GAS_GIANT_HAULER": 1
+    }
+
+    def start_ship(assignmentType):
+        ship_type = ""
+        if assignmentType == "MINING_SHIP":
+            ship_type = "SHIP_MINING_DRONE"
+        elif "HAULER" in assignmentType:
+            ship_type = "SHIP_LIGHT_HAULER"
+        elif assignmentType == "SURVEYOR":
+            ship_type = "SHIP_SURVEYOR"
+        elif assignmentType == "SIPHON_SHIP":
+            ship_type = "SHIP_SIPHON_DRONE"
+        shipyard = buyShip.findShipyard(SYSTEM, ship_type)
+
+        auto_nav(ship, shipyard)
+        dock(ship)
+
+        if assignmentType == "MINING_SHIP":
+            new_ship_name = buyShip.buyMiningDrone(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM, ASTEROIDS)
+            x = threading.Thread(target=auto_nav, args=(new_ship_name, ASTEROIDS), daemon=True)
+            x.start()
+            print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+        elif assignmentType == "ASTEROID_HAULER":
+            new_ship_name = buyShip.buyLightHauler(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM, ASTEROIDS)
+            x = threading.Thread(target=auto_nav, args=(new_ship_name, ASTEROIDS), daemon=True)
+            x.start()
+            print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+        elif assignmentType == "SURVEYOR":
+            new_ship_name = buyShip.buySurveyor(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM, ASTEROIDS)
+            x = threading.Thread(target=auto_nav, args=(new_ship_name, ASTEROIDS), daemon=True)
+            x.start()
+            print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+        elif assignmentType == "TRADE_HAULER":
+            new_ship_name = buyShip.buyLightHauler(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM)
+
+        elif assignmentType == "SIPHON_SHIP":
+            new_ship_name = buyShip.buySiphonDrone(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM, GAS_GIANT)
+            x = threading.Thread(target=auto_nav, args=(new_ship_name, GAS_GIANT), daemon=True)
+            x.start()
+            print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+        elif assignmentType == "GAS_GIANT_HAULER":
+            new_ship_name = buyShip.buyLightHauler(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM, GAS_GIANT)
+            x = threading.Thread(target=auto_nav, args=(new_ship_name, GAS_GIANT), daemon=True)
+            x.start()
+            print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+
+    for s in ship_assignments:
+        if s['assignmentType'] in ships_desired.keys():
+            ships_desired[s['assignmentType']] -= 1
+
+    for assignment_type, num in ships_desired.items():
+        while num > 0:
+            while otherFunctions.getAgent()['data']['credits'] < 1000000:
+                hauling.choose_trade_run_loop(SYSTEM, ship, ["FUEL", "ADVANCED_CIRCUITRY", "FAB_MATS"], False)
+
+            start_ship(assignment_type)
+            num -= 1
+
+    ship_assignments = dbFunctions.get_ship_roles_from_access()
+    ships_desired = {
+        "ASTEROID_HAULER": 3,
+        "MINING_SHIP": 10,
+        "TRADE_HAULER": 4,
+        "SIPHON_SHIP": 2,
+        "GAS_GIANT_HAULER": 2,
+        "SURVEYOR": 3
+    }
+    for s in ship_assignments:
+        if s['assignmentType'] in ships_desired.keys():
+            ships_desired[s['assignmentType']] -= 1
+
+    for assignment_type, num in ships_desired.items():
+        while num > 0:
+            while otherFunctions.getAgent()['data']['credits'] < 700000:
+                hauling.choose_trade_run_loop(SYSTEM, ship, ["ADVANCED_CIRCUITRY", "FAB_MATS"], False)
+
+            start_ship(assignment_type)
+            num -= 1
+
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_B")
+
+
+def find_construction(system):
+    waypoints = dbFunctions.get_waypoints_from_access(system)
+    for wp in waypoints:
+        if wp['isUnderConstruction']:
+            return wp['symbol']
+
+
+def get_construction_materials(system):
+    construction_site = find_construction(system)
+
+    construction_dict = {}
+    if construction_site is None:
+        return construction_dict
+    construction_stats = get_construction(system, construction_site)
+    for material in construction_stats['data']['materials']:
+        if material['required'] != material['fulfilled']:
+            construction_dict[material['tradeSymbol']] = material['required'] - material['fulfilled']
+    return construction_dict
+
+
+def commandPhaseB(ship, system=None):
+    if system is None:
+        system = SYSTEM
+    # Find and deliver FAB_MATS and ADVANCED_CIRCUITRY when supplies are high and cash is above 1.5 million
+
+    construction_site = find_construction(system)
+
+    construction_requirements = get_construction_materials(system)
+    material_sum = sum(construction_requirements.values())
+
+    while material_sum > 0:
+
+        while otherFunctions.getAgent()['data']['credits'] < 1500000:
+            hauling.choose_trade_run_loop(SYSTEM, ship, construction_requirements.keys(), False)
+
+        for material, num_to_deliver in construction_requirements.items():
+            if num_to_deliver > 0:
+                waypoints = dbFunctions.get_waypoints_from_access(system)
+                waypoints = dbFunctions.find_all_with_trait_2(waypoints, "MARKETPLACE")
+                marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material, imports=False, exchange=False)
+                if len(marketplaces) == 0:
+                    marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material)
+                purchase_location = marketplaces[0]['symbol']
+                hauling.trade_cycle(ship, material, system, purchase_location, construction_site, "CONSTRUCTION")
+
+        construction_requirements = get_construction_materials(system)
+        material_sum = sum(construction_requirements.values())
+
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_C")
+
+
+def commandPhaseC(ship):
+    # jump to faction HQ.
+    # spawn traders (heavy) like in explorationRun
+    # spawn explorers for each faction HQ, set them to commandPhaseC
+    # spawn explorers for this faction's start systems, set them to explorationRun
+    # set self to Market Scout
+
+    while True:
+        scout_markets(ship, False)
+        hauling.choose_trade_run_loop(SYSTEM, ship, [], False)
+
+    pass
+
 
 
 def get_all_ships():
@@ -1086,7 +1290,7 @@ def main():
         x.start()
 
     for hauler in gas_giant_haulers:
-        x = threading.Thread(target=haulerLoopB, args=(hauler, siphon_ships, siphon_collection_lock, "X1-DP28-C38"), daemon=True)
+        x = threading.Thread(target=haulerLoopB, args=(hauler, siphon_ships, siphon_collection_lock, GAS_GIANT), daemon=True)
         threads.append(x)
         x.start()
 
@@ -1138,6 +1342,7 @@ def main2():
         while True:
             time.sleep(100)
 
+
 def scout_markets(ship, need_to_chart = True):
     if need_to_chart:
         chart_system(ship)
@@ -1188,7 +1393,6 @@ def scout_markets(ship, need_to_chart = True):
     print(ship, "finished scouting", num_to_scout, "market(s) in system", sys)
 
 
-
 def main3():
     scouts = ["EKMON-2F", "EKMON-2", "EKMON-38", "EKMON-3E", "EKMON-3F", "EKMON-40", "EKMON-42", "EKMON-43", "EKMON-44", "EKMON-45", "EKMON-46"]
     threads = []
@@ -1201,6 +1405,117 @@ def main3():
             x.join()
 
 
+def main4():
+
+    threads = []
+
+    mining_collection_lock = threading.Lock()
+    siphon_collection_lock = threading.Lock()
+    survey_lock = threading.Lock()
+    surveys = []
+    max_num_surveys = 20
+
+    ship_roles = dbFunctions.get_ship_roles_from_access()
+
+    mining_ships = {}
+    siphon_ships = {}
+
+
+    def make_thread(ship_role):
+        t = None
+
+        if ship_role['hasAssignment']:
+            if ship_role['waypointSymbol'] not in mining_ships.keys():
+                mining_ships[ship_role['waypointSymbol']] = []
+                siphon_ships[ship_role['waypointSymbol']] = []
+            if ship_role['assignmentType'] == "MINING_SHIP":
+                mining_ships[ship_role['waypointSymbol']].append(ship_role['shipName'])
+            elif ship_role['assignmentType'] == "SIPHON_SHIP":
+                siphon_ships[ship_role['waypointSymbol']].append(ship_role['shipName'])
+
+
+        if ship_role['hasAssignment']:
+
+            # x = threading.Thread(target=print, args=(ship_role['shipName'],))
+            # return x
+
+            if ship_role['assignmentType'] == "MINING_SHIP":
+                t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], survey_lock, surveys), daemon=True)
+            elif ship_role['assignmentType'] == "SIPHON_SHIP":
+                t = threading.Thread(target=siphonLoop, args=(ship_role['shipName'],), daemon=True)
+            elif ship_role['assignmentType'] == "SURVEYOR":
+                t = threading.Thread(target=survey_loop, args=(ship_role['shipName'], survey_lock, surveys, max_num_surveys), daemon=True)
+            elif ship_role['assignmentType'] == "TRADE_HAULER":
+                t = threading.Thread(target=hauling.choose_trade_run_loop, args=(ship_role['systemSymbol'], ship_role['shipName'], get_construction_materials(ship_role['systemSymbol']).keys()), daemon=True)
+            elif ship_role['assignmentType'] == "ASTEROID_HAULER":
+                if ship_role['waypointSymbol'] in mining_ships.keys():
+                    t = threading.Thread(target=haulerLoopB, args=(ship_role['shipName'], mining_ships[ship_role['waypointSymbol']], mining_collection_lock, ship_role['waypointSymbol']), daemon=True)
+                else:
+                    print("ASTEROID REQUIRES PROGRAM RESTART TO FUNCTION")
+            elif ship_role['assignmentType'] == "GAS_GIANT_HAULER":
+                if ship_role['waypointSymbol'] in siphon_ships.keys():
+                    t = threading.Thread(target=haulerLoopB, args=(ship_role['shipName'], siphon_ships[ship_role['waypointSymbol']], siphon_collection_lock, ship_role['waypointSymbol']), daemon=True)
+                else:
+                    print("GAS GIANT REQUIRES PROGRAM RESTART TO FUNCTION")
+            elif ship_role['assignmentType'] == "MARKET_SCOUT":
+                t = threading.Thread(target=scout_markets, args=(ship_role['shipName'],), daemon=True)
+            elif ship_role['assignmentType'] == "EXPLORER":
+                t = threading.Thread(target=explorationRun, args=(ship_role['shipName'], ship_role['systemSymbol'], ship_role['waypointSymbol']), daemon=True)
+            elif ship_role['assignmentType'] == "COMMAND_PHASE_A":
+                t = threading.Thread(target=commandPhaseA, args=(ship_role['shipName'],), daemon=True)
+            elif ship_role['assignmentType'] == "COMMAND_PHASE_B":
+                t = threading.Thread(target=commandPhaseB, args=(ship_role['shipName'],), daemon=True)
+            elif ship_role['assignmentType'] == "COMMAND_PHASE_C":
+                t = threading.Thread(target=commandPhaseC, args=(ship_role['shipName'],), daemon=True)
+            elif ship_role['assignmentType'] == "":
+                pass
+            else:
+                print("No assignment function for", ship_role['assignmentType'])
+        return t
+
+    considered_ships = []
+
+    for ship_role in ship_roles:
+        x = make_thread(ship_role)
+        considered_ships.append(ship_role['shipName'])
+        if x is not None:
+            threads.append((x, ship_role['shipName']))
+            x.start()
+
+
+    if __name__ == '__main__':
+        while len(threads) > 0:
+            time.sleep(1000)
+            ship_roles = dbFunctions.get_ship_roles_from_access()
+            for ship_role in ship_roles:
+                if ship_role['shipName'] not in considered_ships:
+                    x = make_thread(ship_role)
+                    considered_ships.append(ship_role['shipName'])
+                    if x is not None:
+                        threads.append((x, ship_role['shipName']))
+                        x.start()
+
+            role_map = {}
+            for s in ship_roles:
+                role_map[s['shipName']] = s
+            i = 0
+            while i < len(threads):
+                if threads[i][0].is_alive():
+                    i += 1
+                else:
+                    ship_role = role_map[threads[i][1]]
+                    x = make_thread(ship_role)
+                    if x is None:
+                        threads.pop(i)
+                    else:
+                        x.start()
+                        threads[i] = (x, ship_role['shipName'])
+                        i += 1
+    return threads
+
+
+
+
 init_globals()
 
 if __name__ == '__main__':
@@ -1208,7 +1523,7 @@ if __name__ == '__main__':
     import faulthandler
     faulthandler.enable()
 
-    main()
+    main4()
 
 
 """
@@ -1229,7 +1544,7 @@ EKMON-37 and EKMON-33 to X1-A55-EX7F
 43 -> US85 (Arriving tonight 10pm)
 44 -> SB74 (Arriving Sunday 8pm)
 45 -> FZ33 <- 51, 52
-46 -> KM9 (Arriving Sunday 7am))
+46 -> VC18 (Arriving Sunday 7am))
 40 -> XU25 (Obsidian) (Arriving Saturday 1pm)
 53 -> GU77 (Arriving Saturday 6pm)
 54 -> QY94 (Arriving Saturday 7pm)

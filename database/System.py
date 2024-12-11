@@ -1,5 +1,5 @@
 from SECRETS import TOKEN
-from main import myClient
+from SHARED import myClient
 
 class System:
 

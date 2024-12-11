@@ -6,6 +6,7 @@ from database import Waypoint
 from database.System import *
 from otherFunctions import *
 from SHARED import *
+from SECRETS import UNAME
 from threading import Lock
 
 
@@ -146,25 +147,28 @@ def find_all_with_trait_2(all_waypoints, target_trait):
     return wp_list
 
 
-def search_marketplaces_for_item(waypoint_list, item):
+def search_marketplaces_for_item(waypoint_list, item, imports=True, exports=True, exchange=True):
     stocked_markets = []
     for wp in waypoint_list:
         wp_name = wp["symbol"]
         wp_system = wp["systemSymbol"]
         mark = getMarket(wp_system, wp_name)
-        if search_marketplace_for_item(mark, item):
+        if search_marketplace_for_item(mark, item, imports, exports, exchange):
             stocked_markets.append(wp)
     return stocked_markets
 
 
-def search_marketplace_for_item(marketplace, item):
+def search_marketplace_for_item(marketplace, item, imports=True, exports=True, exchange=True):
     if "data" in marketplace.keys():
         marketplace = marketplace["data"]
 
     goods = []
-    goods.extend(marketplace["exports"])
-    goods.extend(marketplace["imports"])
-    goods.extend(marketplace["exchange"])
+    if imports:
+        goods.extend(marketplace["imports"])
+    if exports:
+        goods.extend(marketplace["exports"])
+    if exchange:
+        goods.extend(marketplace["exchange"])
 
     for good in goods:
         if good["symbol"] == item:
@@ -432,7 +436,8 @@ def get_waypoints_from_access(system=None):
                     "systemSymbol": raw_wp[2],
                     "x": raw_wp[3],
                     "y": raw_wp[4],
-                    "traits": traits
+                    "traits": traits,
+                    "isUnderConstruction": raw_wp[6]
                 }
                 faction = raw_wp[5]
                 if faction is not None and faction != "":
@@ -457,6 +462,24 @@ def get_waypoints_from_access(system=None):
         DB_LOCK.release()
     return waypoints
 
+
+def get_ship_roles_from_access():
+    ship_roles = []
+    DB_LOCK.acquire()
+    cursor.execute('SELECT * FROM ShipAssignments')
+
+    for c in cursor:
+        ship_role = {}
+        ship_role['shipName'] = c[0]
+        ship_role['hasAssignment'] = c[1]
+        ship_role['assignmentType'] = c[2]
+        ship_role['systemSymbol'] = c[3]
+        ship_role['waypointSymbol'] = c[4]
+        if UNAME + "-" in ship_role['shipName']:
+            ship_roles.append(ship_role)
+
+    DB_LOCK.release()
+    return ship_roles
 
 def get_markets_from_access():
     marketplaces = {}
@@ -495,14 +518,39 @@ def get_markets_from_access():
     return markets_list
 
 
+def access_add_ship_assignment(shipName, hasAssignment=False, assignmentType="", assignmentSystem="", assignmentWaypoint=""):
+    access_insert_entry('ShipAssignments',
+                        ["shipName", "hasAssignment", "assignmentType", "assignmentSystem", "assignmentWaypoint"],
+                        [shipName, hasAssignment, assignmentType, assignmentSystem, assignmentWaypoint])
+
+
+def access_update_ship_assignment(shipName, hasAssignment=None, assignmentType=None, assignmentSystem=None, assignmentWaypoint=None):
+    if hasAssignment is not None:
+        access_update_entry('ShipAssignments', ["hasAssignment"], [hasAssignment], ["shipName"], [shipName])
+    if assignmentType is not None:
+        access_update_entry('ShipAssignments', ["assignmentType"], [assignmentType], ["shipName"], [shipName])
+    if assignmentSystem is not None:
+        access_update_entry('ShipAssignments', ["assignmentSystem"], [assignmentSystem], ["shipName"], [shipName])
+    if assignmentWaypoint is not None:
+        access_update_entry('ShipAssignments', ["assignmentWaypoint"], [assignmentWaypoint], ["shipName"], [shipName])
+
+
 def access_insert_entry(table_name, column_name_list, value_list):
-    cmd = "INSERT INTO " + table_name + "(" + column_name_list[0]
+    cmd = "INSERT INTO " + table_name + " (" + column_name_list[0]
     for col_name in column_name_list[1:]:
         cmd += ", " + col_name
-    cmd += ") VALUES ('" + str(value_list[0])
-    for value in value_list[1:]:
-        cmd += "', '" + str(value)
-    cmd += "');"
+    cmd += ") VALUES ("
+    i = 0
+    while i < len(value_list):
+        value = value_list[i]
+        if i > 0:
+            cmd += ", "
+        if type(value) is bool:
+            cmd += str(value)
+        else:
+            cmd += "'" + str(value) + "'"
+        i += 1
+    cmd += ");"
     DB_LOCK.acquire()
     try:
         cursor.execute(cmd)

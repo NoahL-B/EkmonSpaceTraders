@@ -1,70 +1,76 @@
 from SHARED import myClient
 from SECRETS import TOKEN
-from main import SYSTEM, SHIPYARD, ASTEROIDS, orbit, navigate, purchase, sell_all
+from main import orbit
+from otherFunctions import patchShipNav
 
 
-def getShipyard():
-    endpoint = "v2/systems/" + SYSTEM + "/waypoints/" + SHIPYARD + "/shipyard"
+def getShipyard(system, waypoint):
+    endpoint = "v2/systems/" + system + "/waypoints/" + waypoint + "/shipyard"
     params = None
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
 
-def buyMiningDrone():
+def findShipyard(system, ship_type):
+    from database.dbFunctions import get_waypoints_from_access
+
+    waypoints = get_waypoints_from_access(system)
+    for wp in waypoints:
+        for t in wp['traits']:
+            if t['symbol'] == "SHIPYARD":
+                shipyard = getShipyard(system, wp['symbol'])
+                for s in shipyard['data']['shipTypes']:
+                    if s['type'] == ship_type:
+                        return wp['symbol']
+
+
+
+def buyMiningDrone(shipyard):
     endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_MINING_DRONE", "waypointSymbol": SHIPYARD}
+    params = {"shipType": "SHIP_MINING_DRONE", "waypointSymbol": shipyard}
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     orbit(shipName)
-    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
-    return shipName
-
-
-def buyOreHound():
-    endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": SHIPYARD}
-    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
-    shipName = purchasedShip["data"]["ship"]["symbol"]
-    try:
-        uninstallMount(shipName, "MOUNT_SURVEYOR_I")
-        sell_all(shipName, [])
-        purchase(shipName, "MOUNT_MINING_LASER_II", 2)
-        installMount(shipName, "MOUNT_MINING_LASER_II")
-        installMount(shipName, "MOUNT_MINING_LASER_II")
-    except TypeError:
-        print("could not purchase secondary/tertiary mining laser")
-    orbit(shipName)
-    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
-    return shipName
-
-
-def buySurveyHound():
-    endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": SHIPYARD}
-    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
-    shipName = purchasedShip["data"]["ship"]["symbol"]
-    try:
-        uninstallMount(shipName, "MOUNT_MINING_LASER_II")
-        sell_all(shipName, [])
-        purchase(shipName, "MOUNT_SURVEYOR_I", 2)
-        installMount(shipName, "MOUNT_SURVEYOR_I")
-        installMount(shipName, "MOUNT_SURVEYOR_I")
-    except TypeError:
-        print("could not purchase secondary/tertiary surveyor")
-    orbit(shipName)
-    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
-    return shipName
-
-
-def buyProbe():
-    endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_PROBE", "waypointSymbol": SHIPYARD}
-    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
-    shipName = purchasedShip["data"]["ship"]["symbol"]
-    orbit(shipName)
-
-    from otherFunctions import patchShipNav
     patchShipNav(shipName, "BURN")
+    return shipName
 
+
+def buyOreHound(shipyard):
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": shipyard}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
+    return shipName
+
+
+def buySurveyor(shipyard):
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_SURVEYOR", "waypointSymbol": shipyard}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
+    return shipName
+
+
+def buyProbe(shipyard):
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_PROBE", "waypointSymbol": shipyard}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
+    return shipName
+
+
+def buySiphonDrone(shipyard):
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_SIPHON_DRONE", "waypointSymbol": shipyard}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
     return shipName
 
 
@@ -80,28 +86,23 @@ def uninstallMount(ship, mount):
     return myClient.generic_api_call("POST", endpoint, params, TOKEN)
 
 
-def buyLightHauler():
+def buyLightHauler(shipyard):
     endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_LIGHT_HAULER", "waypointSymbol": SHIPYARD}
+    params = {"shipType": "SHIP_LIGHT_HAULER", "waypointSymbol": shipyard}
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
     orbit(shipName)
-    navigate(shipName, ASTEROIDS, nav_and_sleep=True)
+    patchShipNav(shipName, "BURN")
     return shipName
 
 
-def buyRefiningFreighter():
+def buyRefiningFreighter(shipyard):
     endpoint = "v2/my/ships/"
-    params = {"shipType": "SHIP_REFINING_FREIGHTER", "waypointSymbol": SHIPYARD}
+    params = {"shipType": "SHIP_REFINING_FREIGHTER", "waypointSymbol": shipyard}
     purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     shipName = purchasedShip["data"]["ship"]["symbol"]
-    uninstallMount(shipName, "MOUNT_TURRET_I")
-    uninstallMount(shipName, "MOUNT_TURRET_I")
-    uninstallMount(shipName, "MOUNT_MISSILE_LAUNCHER_I")
-    purchase(shipName, "MOUNT_SURVEYOR_I", 3)
-    installMount(shipName, "MOUNT_SURVEYOR_I")
-    installMount(shipName, "MOUNT_SURVEYOR_I")
-    installMount(shipName, "MOUNT_SURVEYOR_I")
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
     return shipName
 
 
