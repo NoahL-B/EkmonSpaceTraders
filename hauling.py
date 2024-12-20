@@ -1,4 +1,5 @@
 from main import *
+import economy
 
 
 def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type="MARKET",
@@ -39,8 +40,9 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
                     print("Unprofitable origin: supply is too low")
                     return
             else:
-                if origin_target_good['purchasePrice'] < stop_on_unprofitable_origin:
+                if origin_target_good['purchasePrice'] > stop_on_unprofitable_origin:
                     print("Unprofitable origin: product is too expensive")
+                    return
 
 
         num_to_buy = capacity - cargo['units']
@@ -126,7 +128,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
             num_to_offload = min(num_needed, num_to_offload)
 
             if num_to_offload > 0:
-                s = supply_construction(ship, system, destination_waypoint, product, capacity)
+                s = supply_construction(ship, system, destination_waypoint, product, num_to_offload)
                 cargo = s['data']['cargo']
                 print(ship, s)
             else:
@@ -317,7 +319,7 @@ def sell_off_existing_cargo(ship):
             sale_locations[sell_location] = [item]
 
     for location in sale_locations.keys():
-        print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
+        # print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
         auto_nav(ship, location)
         dock(ship)
         for item in sale_locations[location]:
@@ -329,48 +331,6 @@ def sell_off_existing_cargo(ship):
             if num_to_offload > 0:
                 sell(ship, item['symbol'], num_to_offload)
         orbit(ship)
-
-
-
-
-def main_1(ship):
-    product = 'ADVANCED_CIRCUITRY'
-    system = 'X1-DP28'
-    origin_waypoint = 'X1-DP28-D42'
-    destination_waypoint = 'X1-DP28-I52'
-    destination_type = 'CONSTRUCTION'
-
-    trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type, True, True)
-
-
-def main_2(ship):
-    product = 'FAB_MATS'
-    system = 'X1-DP28'
-    origin_waypoint = 'X1-DP28-F46'
-    destination_waypoint = 'X1-DP28-I52'
-    destination_type = 'CONSTRUCTION'
-
-    trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type, True, True)
-
-
-def main_3(ship):
-    product = 'IRON'
-    system = 'X1-DP28'
-    origin_waypoint = 'X1-DP28-H48'
-    destination_waypoint = 'X1-DP28-F46'
-    destination_type = 'MARKET'
-
-    trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type, True, True)
-
-
-def main_4(ship):
-    product = 'COPPER'
-    system = 'X1-DP28'
-    origin_waypoint = 'X1-DP28-H48'
-    destination_waypoint = 'X1-DP28-F46'
-    destination_type = 'MARKET'
-
-    trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type, True, True)
 
 
 def choose_trade_loop(system, ship, ignored_goods=('FUEL',)):
@@ -491,25 +451,25 @@ def choose_trade_run_loop(system, ship, ignored_goods=('FUEL',), loop=True):
                 trade_run(ship, item, system, origin, destination)
 
 
+def stimulate_economy(system, ship, good):
+    predecessors = economy.get_immediate_predecessors([good])
+    traded_goods = False
+    if len(predecessors) == 0:
+        return traded_goods
+    waypoints = dbFunctions.get_waypoints_from_access(system)
+    markets = dbFunctions.find_all_with_trait_2(waypoints, "MARKETPLACE")
+    destinations = dbFunctions.search_marketplaces_for_item(markets, good, imports=False, exchange=False)
+    for destination in destinations:
+        market_stats = dbFunctions.access_get_market(destination['symbol'])
 
+        for trade_good in market_stats:
+            if trade_good['symbol'] in predecessors and trade_good['supply'] != "ABUNDANT":
+                origins = dbFunctions.search_marketplaces_for_item(markets, trade_good['symbol'], imports=False, exchange=False)
+                for origin in origins:
+                    market_2_stats = dbFunctions.access_get_market(origin['symbol'])
+                    for trade_good_2 in market_2_stats:
+                        if trade_good_2['symbol'] == trade_good['symbol'] and trade_good_2['supply'] != "SCARCE":
+                            trade_run(ship, trade_good['symbol'], system, origin['symbol'], destination['symbol'])
+                            traded_goods = True
+    return traded_goods
 
-
-
-
-if __name__ == '__main__':
-
-    a = "EKMON-A"
-    b = "EKMON-11"
-    c = "EKMON-12"
-    d = "EKMON-13"
-    e = "EKMON-24"
-    f = "EKMON-25"
-
-    # main_2(e)
-    # sell_off_existing_cargo(a)
-    # sell_off_existing_cargo(b)
-    # sell_off_existing_cargo(c)
-    # sell_off_existing_cargo(d)
-    # sell_off_existing_cargo(e)
-    # sell_off_existing_cargo(f)
-    choose_trade_run_loop("X1-BN96", f, [])

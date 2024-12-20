@@ -34,6 +34,15 @@ def buyMiningDrone(shipyard):
     return shipName
 
 
+def buyExplorer(shipyard):
+    endpoint = "v2/my/ships/"
+    params = {"shipType": "SHIP_EXPLORER", "waypointSymbol": shipyard}
+    purchasedShip = myClient.generic_api_call("POST", endpoint, params, TOKEN)
+    shipName = purchasedShip["data"]["ship"]["symbol"]
+    orbit(shipName)
+    patchShipNav(shipName, "BURN")
+    return shipName
+
 def buyOreHound(shipyard):
     endpoint = "v2/my/ships/"
     params = {"shipType": "SHIP_ORE_HOUND", "waypointSymbol": shipyard}

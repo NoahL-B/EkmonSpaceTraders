@@ -5,6 +5,7 @@ import threading
 import json
 from datetime import datetime, timedelta, timezone
 
+import economy
 from SECRETS import TOKEN
 from SHARED import myClient
 
@@ -68,6 +69,12 @@ def get_active_contracts(all_contracts, accept_unaccepted=False, include_unaccep
             elif include_unaccepted:
                 active_contracts.append(c)
     return active_contracts
+
+
+def waypoint_name_to_system_name(waypoint_name):
+    name_list = waypoint_name.split("-")
+    system_name = name_list[0] + "-" + name_list[1]
+    return system_name
 
 
 def refine(ship, item_to_produce):
@@ -338,9 +345,13 @@ def auto_nav(ship, destination):
         waypoint_num += 1
 
 
-def jump(ship, system, jump_and_sleep=False):
+def get_jump_gate(system, waypoint):
+    endpoint = "v2/systems/" + system + "/waypoints/" + waypoint + "/jump-gate"
+    return myClient.generic_api_call("GET", endpoint, None, TOKEN)
+
+def jump(ship, waypoint, jump_and_sleep=False):
     endpoint = "v2/my/ships/" + ship + "/jump"
-    params = {"systemSymbol": system}
+    params = {"waypointSymbol": waypoint}
     to_return = myClient.generic_api_call("POST", endpoint, params, TOKEN)
     if jump_and_sleep:
         sleep_time = to_return["data"]["cooldown"]["totalSeconds"]
@@ -364,6 +375,67 @@ def warp(ship, waypoint, warp_and_sleep=False, sleep_counter=True):
             time.sleep(sleep_time)
 
     return to_return
+
+
+
+def auto_jump_warp(ship, destination_system):
+    ship_stats = get_ship(ship)
+    origin_system = ship_stats['data']['nav']['systemSymbol']
+    status = ship_stats['data']['nav']['status']
+    fuel = ship_stats['data']['fuel']['current']
+    fuel_cap = ship_stats['data']['fuel']['capacity']
+    can_warp = False
+
+    modules = ship_stats['data']['modules']
+    for m in modules:
+        if "WARP" in m['symbol']:
+            can_warp = True
+
+    if status == "DOCKED":
+        orbit(ship)
+    elif status == "IN_TRANSIT":
+        sleep_until_arrival(ship)
+    if origin_system == destination_system:
+        return
+
+    local_jump_gate = None
+    local_waypoints = dbFunctions.get_waypoints_from_access(origin_system)
+    for wp in local_waypoints:
+        if wp['type'] == "JUMP_GATE":
+            local_jump_gate = wp['symbol']
+
+    if local_jump_gate is None:
+        if can_warp:
+            otherFunctions.patchShipNav(ship, "DRIFT")
+            waypoints = dbFunctions.get_waypoints_from_access(destination_system)
+            destination_waypoint = random.choice(waypoints)['symbol']
+            warp(ship, destination_waypoint, False, True)
+            otherFunctions.patchShipNav(ship, "BURN")
+            sleep_until_arrival(ship)
+            return
+        else:
+            print("No jump gate is available, and", ship, "cannot warp!")
+
+    auto_nav(ship, local_jump_gate)
+    jump_gate_stats = get_jump_gate(origin_system, local_jump_gate)
+    jumped = False
+    for c in jump_gate_stats['data']['connections']:
+        if not jumped:
+            if destination_system in c:
+                jump(ship, c, True)
+                jumped = True
+    if not jumped:
+        if can_warp:
+            otherFunctions.patchShipNav(ship, "DRIFT")
+            waypoints = dbFunctions.get_waypoints_from_access(destination_system)
+            destination_waypoint = random.choice(waypoints)['symbol']
+            warp(ship, destination_waypoint, False, False)
+            otherFunctions.patchShipNav(ship, "BURN")
+            sleep_until_arrival(ship)
+        else:
+            print("Too complicated a jump/warp to complete")
+
+
 
 
 
@@ -680,9 +752,9 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
 
             full = capacity == inventory_size
 
-            while not full:
-                try:
-                    lock.acquire()
+            lock.acquire()
+            try:
+                while not full:
                     for e in excavators:
                         if capacity > inventory_size:
                             result = cargo(e)
@@ -696,20 +768,18 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
                                     if num_units > 0:
                                         otherFunctions.transfer(e, hauler, i['symbol'], num_units)
                                         inventory_size += num_units
-                finally:
-                    lock.release()
-
-                time.sleep(30)
 
 
-                c = cargo(hauler)['data']
-                if c['units'] > 0:
-                    pass  # print(hauler + ': ' + str(c))
+                    c = cargo(hauler)['data']
+                    if c['units'] > 0:
+                        pass  # print(hauler + ': ' + str(c))
 
-                full = c['units'] >= capacity * 0.9
+                    full = c['units'] >= capacity * 0.9
 
-            lock.acquire()
-            lock.release()
+            finally:
+                lock.release()
+
+
             hauling.sell_off_existing_cargo(hauler)
 
         except TypeError:
@@ -969,37 +1039,130 @@ def commandPhaseB(ship, system=None):
     while material_sum > 0:
 
         while otherFunctions.getAgent()['data']['credits'] < 1500000:
-            hauling.choose_trade_run_loop(SYSTEM, ship, construction_requirements.keys(), False)
+            hauling.choose_trade_run_loop(system, ship, construction_requirements.keys(), False)
 
         for material, num_to_deliver in construction_requirements.items():
             if num_to_deliver > 0:
+                agent_credits = otherFunctions.getAgent()['data']['credits'] - 1000000
+                max_cost = agent_credits/material_sum
                 waypoints = dbFunctions.get_waypoints_from_access(system)
                 waypoints = dbFunctions.find_all_with_trait_2(waypoints, "MARKETPLACE")
                 marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material, imports=False, exchange=False)
                 if len(marketplaces) == 0:
                     marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material)
                 purchase_location = marketplaces[0]['symbol']
+                hauling.trade_cycle(ship, material, system, purchase_location, construction_site, "CONSTRUCTION", stop_on_unprofitable_origin=max_cost)
                 hauling.trade_cycle(ship, material, system, purchase_location, construction_site, "CONSTRUCTION")
+
+        start = datetime.now()
+        while datetime.now() - start < timedelta(minutes=30):
+            if otherFunctions.getAgent()['data']['credits'] < 2000000:
+                hauling.choose_trade_run_loop(SYSTEM, ship, construction_requirements.keys(), False)
+            else:
+                products_to_promote = economy.get_all_predecessors(construction_requirements.keys())
+                products_to_promote.reverse()
+                num_promoted_products = 0
+                for product in products_to_promote:
+                    if hauling.stimulate_economy(system, ship, product):
+                        num_promoted_products += 1
+                print(ship, "stimulated the economy of", num_promoted_products, "trade goods")
+
 
         construction_requirements = get_construction_materials(system)
         material_sum = sum(construction_requirements.values())
 
-    dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_C")
+    agent = otherFunctions.getAgent()
+    faction_name = agent['data']['startingFaction']
+    faction = otherFunctions.getFaction(faction_name)
+    headquarters = faction['data']['headquarters']
+    hq_system = waypoint_name_to_system_name(headquarters)
+
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_C", assignmentSystem=hq_system, assignmentWaypoint="")
 
 
-def commandPhaseC(ship):
-    # jump to faction HQ.
-    # spawn traders (heavy) like in explorationRun
-    # spawn explorers for each faction HQ, set them to commandPhaseC
-    # spawn explorers for this faction's start systems, set them to explorationRun
-    # set self to Market Scout
+def commandPhaseC(ship, system):
 
-    while True:
-        scout_markets(ship, False)
-        hauling.choose_trade_run_loop(SYSTEM, ship, [], False)
+    auto_jump_warp(ship, system)
+    scout_markets(ship, False)
 
-    pass
+    ship_assignments = dbFunctions.get_ship_roles_from_access()
+    trade_haulers_desired = 3
 
+    ship_prices = {}
+    for ship_type in ["SHIP_REFINING_FREIGHTER", "SHIP_EXPLORER"]:
+        shipyard = buyShip.findShipyard(system, ship_type)
+        auto_nav(ship, shipyard)
+        shipyard_stats = buyShip.getShipyard(system, shipyard)
+        for s in shipyard_stats['data']['ships']:
+            ship_prices[s['type']] = s['purchasePrice']
+
+
+    for s in ship_assignments:
+        if s['assignmentType'] == "TRADE_HAULER" and s['systemSymbol'] == system:
+            trade_haulers_desired -= 1
+
+    while trade_haulers_desired > 0:
+        while otherFunctions.getAgent()['data']['credits'] < ship_prices['SHIP_REFINING_FREIGHTER'] * 2:
+            hauling.choose_trade_run_loop(system, ship, [], False)
+        shipyard = buyShip.findShipyard(system, "SHIP_REFINING_FREIGHTER")
+        auto_nav(ship, shipyard)
+        new_ship_name = buyShip.buyRefiningFreighter(shipyard)
+        dbFunctions.access_add_ship_assignment(new_ship_name, True, "TRADE_HAULER", system)
+        trade_haulers_desired -= 1
+
+    systems_with_assignments = []
+    for s in ship_assignments:
+        if s['hasAssignment']:
+            if s['systemSymbol'] not in systems_with_assignments:
+                systems_with_assignments.append(s['systemSymbol'])
+
+    all_waypoints = dbFunctions.get_waypoints_from_access()
+    this_faction = None
+    all_factions = []
+    incomplete_jump_gates = []
+
+    for wp in all_waypoints:
+        if 'faction' in wp.keys():
+            if wp['systemSymbol'] == system:
+                this_faction = wp['faction']
+            if wp['faction'] not in all_factions:
+                all_factions.append(wp['faction'])
+
+
+    for wp in all_waypoints:
+        if wp['isUnderConstruction']:
+            if 'faction' in wp.keys():
+                if wp['faction'] == this_faction:
+                    if wp['systemSymbol'] not in systems_with_assignments:
+                        incomplete_jump_gates.append(wp)
+
+    for ijg in incomplete_jump_gates:
+        while otherFunctions.getAgent()['data']['credits'] < ship_prices['SHIP_EXPLORER'] * 2:
+            hauling.choose_trade_run_loop(system, ship, [], False)
+
+        destination_system = ijg['systemSymbol']
+        destination_shipyard = buyShip.findShipyard(destination_system, "SHIP_LIGHT_HAULER")
+        if destination_shipyard is not None:
+
+            shipyard = buyShip.findShipyard(system, "SHIP_EXPLORER")
+            auto_nav(ship, shipyard)
+            new_ship_name = buyShip.buyExplorer(shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, "EXPLORER", destination_system, destination_shipyard)
+
+    for faction in all_factions:
+        faction_stats = otherFunctions.getFaction(faction)
+        faction_hq = faction_stats['data']['headquarters']
+        if faction_hq:
+            faction_system = waypoint_name_to_system_name(faction_hq)
+            if faction_system not in systems_with_assignments:
+                while otherFunctions.getAgent()['data']['credits'] < ship_prices['SHIP_EXPLORER'] * 2:
+                    hauling.choose_trade_run_loop(system, ship, [], False)
+                shipyard = buyShip.findShipyard(system, "SHIP_EXPLORER")
+                auto_nav(ship, shipyard)
+                new_ship_name = buyShip.buyExplorer(shipyard)
+                dbFunctions.access_add_ship_assignment(new_ship_name, True, "COMMAND_PHASE_C", faction_system)
+
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="MARKET_SCOUT")
 
 
 def get_all_ships():
@@ -1222,125 +1385,6 @@ def trade_loop(ship, purchase_waypoint, sell_waypoint, item, trade_volume, margi
             profitable = False
 
 
-def main():
-    all_ships = get_all_ships()
-    to_remove = []
-    for s in all_ships:
-        if s['symbol'] in ["EKMON-1", "EKMON-41"]:
-            to_remove.append(s)
-    for s in to_remove:
-        all_ships.remove(s)
-
-    survey_mounts = ["MOUNT_SURVEYOR_I",
-                     "MOUNT_SURVEYOR_II",
-                     "MOUNT_SURVEYOR_III"
-                     ]
-    mining_mounts = ["MOUNT_MINING_LASER_I",
-                     "MOUNT_MINING_LASER_II",
-                     "MOUNT_MINING_LASER_III"]
-
-    siphon_mounts = ["MOUNT_GAS_SIPHON_I",
-                     "MOUNT_GAS_SIPHON_II",
-                     "MOUNT_GAS_SIPHON_III"]
-
-    mining_ships = ships_to_names(get_ships_by_mounts(all_ships, mining_mounts))
-    survey_ships = ships_to_names(get_ships_by_mounts(all_ships, survey_mounts))
-    siphon_ships = ships_to_names(get_ships_by_mounts(all_ships, siphon_mounts))
-    explorers = ships_to_names(get_ships_by_frame(all_ships, "FRAME_EXPLORER"))
-
-    i = 0
-    while i < len(mining_ships):
-        if mining_ships[i] in siphon_ships:
-            siphon_ships.remove(mining_ships[i])
-        if mining_ships[i] in survey_ships:
-            if len(mining_ships) > 2.5 * len(survey_ships):
-                mining_ships.pop(i)
-            else:
-                survey_ships.remove(mining_ships[i])
-                i += 1
-        else:
-            i += 1
-
-    for e in explorers:
-        if e in siphon_ships:
-            siphon_ships.remove(e)
-
-    threads = []
-    survey_lock = threading.Lock()
-    surveys = []
-
-    max_num_surveys = min(100, 2*len(mining_ships))
-
-    mining_collection_lock = threading.Lock()
-    siphon_collection_lock = threading.Lock()
-
-    asteroid_haulers = ["EKMON-A", "EKMON-11", "EKMON-12", "EKMON-13"]
-    gas_giant_haulers = ["EKMON-3C", "EKMON-3D"]
-    trade_haulers = ["EKMON-24", "EKMON-25", "EKMON-34", "EKMON-35", "EKMON-36", "EKMON-37", "EKMON-47", "EKMON-48", "EKMON-49", "EKMON-4A", "EKMON-4B", "EKMON-4C", "EKMON-4D", "EKMON-4E", "EKMON-4F", "EKMON-50", "EKMON-51", "EKMON-52", "EKMON-55", "EKMON-56", "EKMON-57", "EKMON-58"]
-    refineries = []
-
-    for hauler in asteroid_haulers:
-        x = threading.Thread(target=haulerLoopB, args=(hauler, mining_ships, mining_collection_lock, ASTEROIDS), daemon=True)
-        threads.append(x)
-        x.start()
-
-    for refinery in refineries:
-        x = threading.Thread(target=refinerLoop, args=(refinery, mining_ships, asteroid_haulers, mining_collection_lock), daemon=True)
-        threads.append(x)
-        x.start()
-
-    for hauler in gas_giant_haulers:
-        x = threading.Thread(target=haulerLoopB, args=(hauler, siphon_ships, siphon_collection_lock, GAS_GIANT), daemon=True)
-        threads.append(x)
-        x.start()
-
-
-    for hauler in trade_haulers:
-        system = None
-        for s in all_ships:
-            if s['symbol'] == hauler:
-                system = s['nav']['systemSymbol']
-        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(system, hauler, []), daemon=True)
-        threads.append(x)
-        x.start()
-
-    for surveyor in survey_ships:
-        x = threading.Thread(target=survey_loop, args=(surveyor, survey_lock, surveys, max_num_surveys), daemon=True)
-        threads.append(x)
-        x.start()
-        # print("surveyor started!", surveyor)
-
-
-    for drone in mining_ships:
-        x = threading.Thread(target=minerLoop, args=(drone, survey_lock, surveys), daemon=True)
-        threads.append(x)
-        x.start()
-        # print("miner started!", drone)
-
-    for drone in siphon_ships:
-        x = threading.Thread(target=siphonLoop, args=(drone,), daemon=True)
-        threads.append(x)
-        x.start()
-
-    if __name__ == '__main__':
-        while True:
-            main3()
-            time.sleep(1000)
-    return threads
-
-
-def main2():
-    import hauling
-    for hauler in ["EKMON-12", "EKMON-13", "EKMON-25"]:
-        ship_stats = get_ship(hauler)
-        sys = ship_stats['data']['nav']['systemSymbol']
-        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(sys, hauler, []), daemon=True)
-        x.start()
-        time.sleep(5)
-
-    if __name__ == '__main__':
-        while True:
-            time.sleep(100)
 
 
 def scout_markets(ship, need_to_chart = True):
@@ -1393,19 +1437,9 @@ def scout_markets(ship, need_to_chart = True):
     print(ship, "finished scouting", num_to_scout, "market(s) in system", sys)
 
 
-def main3():
-    scouts = ["EKMON-2F", "EKMON-2", "EKMON-38", "EKMON-3E", "EKMON-3F", "EKMON-40", "EKMON-42", "EKMON-43", "EKMON-44", "EKMON-45", "EKMON-46"]
-    threads = []
-    for scout in scouts:
-        x = threading.Thread(target=scout_markets, args=(scout, True), daemon=True)
-        x.start()
-        threads.append(x)
-    if __name__ == '__main__':
-        for x in threads:
-            x.join()
 
 
-def main4():
+def main():
 
     threads = []
 
@@ -1436,9 +1470,6 @@ def main4():
 
         if ship_role['hasAssignment']:
 
-            # x = threading.Thread(target=print, args=(ship_role['shipName'],))
-            # return x
-
             if ship_role['assignmentType'] == "MINING_SHIP":
                 t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], survey_lock, surveys), daemon=True)
             elif ship_role['assignmentType'] == "SIPHON_SHIP":
@@ -1464,9 +1495,9 @@ def main4():
             elif ship_role['assignmentType'] == "COMMAND_PHASE_A":
                 t = threading.Thread(target=commandPhaseA, args=(ship_role['shipName'],), daemon=True)
             elif ship_role['assignmentType'] == "COMMAND_PHASE_B":
-                t = threading.Thread(target=commandPhaseB, args=(ship_role['shipName'],), daemon=True)
+                t = threading.Thread(target=commandPhaseB, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
             elif ship_role['assignmentType'] == "COMMAND_PHASE_C":
-                t = threading.Thread(target=commandPhaseC, args=(ship_role['shipName'],), daemon=True)
+                t = threading.Thread(target=commandPhaseC, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
             elif ship_role['assignmentType'] == "":
                 pass
             else:
@@ -1515,37 +1546,8 @@ def main4():
 
 
 
-
 init_globals()
 
 if __name__ == '__main__':
+    main()
 
-    import faulthandler
-    faulthandler.enable()
-
-    main4()
-
-
-"""
-
-EKMON-25 and EKMON-2F to X1-BN96-I58
-EKMON-34 and EKMON-30 to X1-GQ86-C10B
-EKMON-35 and EKMON-31 to X1-DX47-ZC7C
-EKMON-36 and EKMON-32 to X1-QC60-X11Z
-EKMON-37 and EKMON-33 to X1-A55-EX7F
-
-"""
-
-"""
-3E -> GA24 <- 47, 48
-3F -> HX47 <- 49, 4A, 4B, 4C
-      DM36 <- 55, 56, 57, 58
-42 -> NU95 <- 4D, 4E, 4F, 50
-43 -> US85 (Arriving tonight 10pm)
-44 -> SB74 (Arriving Sunday 8pm)
-45 -> FZ33 <- 51, 52
-46 -> VC18 (Arriving Sunday 7am))
-40 -> XU25 (Obsidian) (Arriving Saturday 1pm)
-53 -> GU77 (Arriving Saturday 6pm)
-54 -> QY94 (Arriving Saturday 7pm)
-"""

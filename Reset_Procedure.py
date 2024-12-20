@@ -4,13 +4,13 @@ import shutil
 
 from SHARED import cursor
 from SpacePyTraders import client
+from __SECRETS import UNAME, EMAIL
 
 myClient = client.Client("", "")
 
 UTC_NOW = dt.datetime.now(dt.timezone.utc)
-TARGET_UNAME = "EKMON"
+TARGET_UNAME = UNAME
 STARTING_FACTION = "COSMIC"
-EMAIL = None
 
 # all_factions = ["COSMIC",   "VOID",     "GALACTIC", "QUANTUM",  "DOMINION",
 #                "ASTRO",    "CORSAIRS", "OBSIDIAN", "AEGIS",    "UNITED",

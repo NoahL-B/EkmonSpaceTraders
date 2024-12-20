@@ -54,6 +54,11 @@ def getAgent():
     return myClient.generic_api_call("GET", endpoint, params, TOKEN)
 
 
+def getFaction(faction_name):
+    endpoint = "v2/factions/" + faction_name
+    params = None
+    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+
 def patchShipNav(ship, flightMode):
     endpoint = "v2/my/ships/" + ship + "/nav"
     params = {"flightMode": flightMode}
