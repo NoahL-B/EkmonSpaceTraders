@@ -1,4 +1,5 @@
 from main import *
+from api_requests import api_functions as api
 import economy
 
 
@@ -17,7 +18,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
         auto_nav(ship, origin_waypoint)
         dock(ship)
 
-        origin_market = otherFunctions.getMarket(system, origin_waypoint)
+        origin_market = api.get_market(TOKEN, system, origin_waypoint)
 
         origin_target_good = None
         origin_trade_goods = origin_market['data']['tradeGoods']
@@ -78,7 +79,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
 
         if destination_type == 'MARKET':
 
-            destination_market = otherFunctions.getMarket(system, destination_waypoint)
+            destination_market = api.get_market(TOKEN, system, destination_waypoint)
 
             target_good = None
             trade_goods = destination_market['data']['tradeGoods']
@@ -150,7 +151,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
             num_to_deliver = min(num_required, num_to_offload)
             if num_to_deliver == 0:
                 print('Completed contract for this product')
-                fulfill = otherFunctions.fulfillContract(contract_map['id'])
+                fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
                 if fulfill:
                     print('Completed entire contract')
                 return
@@ -173,7 +174,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
     auto_nav(ship, origin_waypoint)
     dock(ship)
 
-    origin_market = otherFunctions.getMarket(system, origin_waypoint)
+    origin_market = api.get_market(TOKEN, system, origin_waypoint)
     origin_target_good = None
     origin_trade_goods = origin_market['data']['tradeGoods']
 
@@ -278,7 +279,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
         num_to_deliver = min(num_required, num_to_offload)
         if num_to_deliver == 0:
             print('Completed contract for this product')
-            fulfill = otherFunctions.fulfillContract(contract_map['id'])
+            fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
             if fulfill:
                 print('Completed entire contract')
             return

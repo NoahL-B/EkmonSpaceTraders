@@ -4,7 +4,6 @@ import time
 
 from database import Waypoint
 from database.System import *
-from otherFunctions import *
 from SHARED import *
 from SECRETS import UNAME
 from threading import Lock
@@ -152,7 +151,7 @@ def search_marketplaces_for_item(waypoint_list, item, imports=True, exports=True
     for wp in waypoint_list:
         wp_name = wp["symbol"]
         wp_system = wp["systemSymbol"]
-        mark = getMarket(wp_system, wp_name)
+        mark = api.get_market(TOKEN, wp_system, wp_name)
         if search_marketplace_for_item(mark, item, imports, exports, exchange):
             stocked_markets.append(wp)
     return stocked_markets
@@ -227,8 +226,7 @@ def get_all_systems():
 
 def get_systems_dot_json():
     endpoint = "v2/systems.json"
-    params = None
-    return myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    return api.raw_api_requests.RH.get(endpoint).json()
 
 
 def get_all_waypoints_in_system(systemSymbol):
@@ -286,7 +284,7 @@ def populate_markets():
     for wp in all_waypoints:
         for trait in wp["traits"]:
             if trait["symbol"] == "MARKETPLACE":
-                getMarket(wp["systemSymbol"], wp["symbol"])
+                api.get_market(TOKEN, wp["systemSymbol"], wp["symbol"])
 
 
 def populate_waypoints(all_systems):

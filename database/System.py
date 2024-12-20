@@ -1,5 +1,5 @@
 from SECRETS import TOKEN
-from SHARED import myClient
+import api_requests.api_functions as api
 
 class System:
 
@@ -41,25 +41,19 @@ class System:
 
 
 def getSystem(systemSymbol):
-    endpoint = "v2/systems/" + systemSymbol
-    params = None
-    data = myClient.generic_api_call("GET", endpoint, params, TOKEN)["data"]
+    data = api.get_system(TOKEN, systemSymbol)
     return System(data)
 
 
 def listSystems(limit=10, page=1):
-    endpoint = "v2/systems/"
-    params = {"limit": limit, "page": page}
-    data = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    data = api.list_systems(TOKEN, limit, page)
     return data
 
 
 def listWaypointsInSystem(systemSymbol, limit=10, page=1):
-    endpoint = "v2/systems/" + systemSymbol + "/waypoints"
-    params = {"limit": limit, "page": page}
-    data = myClient.generic_api_call("GET", endpoint, params, TOKEN)
+    data = api.list_waypoints_in_system(TOKEN, systemSymbol, limit=limit, page=page)
     return data
 
 
 if __name__ == '__main__':
-    print(listSystems(20, 600))
+    print(listSystems(20, 50))

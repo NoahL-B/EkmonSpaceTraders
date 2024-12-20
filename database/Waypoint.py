@@ -1,5 +1,5 @@
 from SECRETS import TOKEN
-from SHARED import myClient
+import api_requests.api_functions as api
 
 class Waypoint:
 
@@ -54,12 +54,10 @@ class Waypoint:
 
 
 def getWaypoint(systemSymbol, waypointSymbol):
-    endpoint = "v2/systems/" + systemSymbol + "/waypoints/" + waypointSymbol
-    params = None
-    data = myClient.generic_api_call("GET", endpoint, params, TOKEN)["data"]
+    data = api.get_waypoint(TOKEN, systemSymbol, waypointSymbol)['data']
     return Waypoint(data)
 
 
 
 if __name__ == '__main__':
-    print(getWaypoint("X1-RJ19", "X1-RJ19-60370Z"))
+    print(getWaypoint("X1-UF69", "X1-UF69-I52"))
