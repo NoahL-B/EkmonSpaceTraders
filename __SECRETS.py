@@ -2,6 +2,7 @@ import pyodbc
 import os
 
 UNAME = "EKMON"
+EMAIL = "awesomeguynitlib@gmail.com"
 
 base_path = os.path.dirname(__file__)
 db_path = os.path.join(base_path, "SpaceTradersDatabase.accdb")
