@@ -1187,7 +1187,7 @@ def update_material_values():
 update_material_values()
 
 
-def scout_markets(ship, need_to_chart = True):
+def scout_markets(ship, need_to_chart=True):
     if need_to_chart:
         chart_system(ship)
 

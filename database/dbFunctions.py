@@ -225,7 +225,7 @@ def get_all_systems():
 
 
 def get_systems_dot_json():
-    endpoint = "v2/systems.json"
+    endpoint = "systems.json"
     return api.raw_api_requests.RH.get(endpoint).json()
 
 
@@ -234,13 +234,17 @@ def get_all_waypoints_in_system(systemSymbol):
 
     waypoints_per_page = 20
 
-    num_waypoints = listWaypointsInSystem(systemSymbol, waypoints_per_page)["meta"]["total"]
+    first_page = listWaypointsInSystem(systemSymbol, waypoints_per_page)
+    for i in range(len(first_page['data'])):
+        system_waypoints.append(first_page["data"][i])
+
+    num_waypoints = first_page["meta"]["total"]
     num_pages = num_waypoints // waypoints_per_page
 
     if num_waypoints % waypoints_per_page != 0:
         num_pages += 1
 
-    for page in range(1, num_pages + 1):
+    for page in range(2, num_pages + 1):
         l = listWaypointsInSystem(systemSymbol, waypoints_per_page, page)
         for i in range(len(l['data'])):
             system_waypoints.append(l["data"][i])
@@ -261,8 +265,14 @@ def get_all_waypoints(all_systems):
     return all_waypoints
 
 
-def get_all_waypoints_generator(all_systems):
+def get_all_waypoints_generator(all_systems, unknown_only=False):
     notable_systems = get_notable_systems(all_systems)
+
+    if unknown_only:
+        notable_systems = get_unknown_systems(notable_systems)
+
+
+
     for s in notable_systems:
         systemSymbol = s["symbol"]
         system_waypoints = get_all_waypoints_in_system(systemSymbol)
@@ -278,6 +288,27 @@ def get_notable_systems(all_systems):
             notable_systems.append(s)
     return notable_systems
 
+
+def get_unknown_systems(all_systems):
+    unknown_systems = []
+    recorded_waypoint_count = {}
+    recorded_waypoints = get_waypoints_from_access()
+    for wp in recorded_waypoints:
+        system = wp['systemSymbol']
+        if system in recorded_waypoint_count.keys():
+            recorded_waypoint_count[system] += 1
+        else:
+            recorded_waypoint_count[system] = 1
+
+    for s in all_systems:
+        num_waypoints = len(s['waypoints'])
+        system_name = s['symbol']
+        num_waypoints_recorded = 0
+        if system_name in recorded_waypoint_count.keys():
+            num_waypoints_recorded = recorded_waypoint_count[system_name]
+        if num_waypoints != num_waypoints_recorded:
+            unknown_systems.append(s)
+    return unknown_systems
 
 def populate_markets():
     all_waypoints = get_waypoints_from_access()
@@ -295,11 +326,11 @@ def populate_waypoints(all_systems):
 
     counter = 0
 
-    for wp in get_all_waypoints_generator(all_systems):
+    for wp in get_all_waypoints_generator(all_systems, True):
         wp_obj = Waypoint.Waypoint(wp)
         populate_waypoint(wp_obj, access_waypoint_symbols)
         counter += 1
-        print("\r", counter, wp["symbol"], end="")
+        # print("\r", counter, wp["symbol"], end="")
 
 
 def populate_waypoint(wp_object, access_waypoint_symbols=None):

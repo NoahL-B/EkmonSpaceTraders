@@ -23,7 +23,7 @@ def fill_table_defaults():
 
     api_functions.patch_ship_nav(TOKEN, command_ship_name, "BURN")
 
-    x = threading.Thread(target=scout_markets(command_ship_name, False))
+    x = threading.Thread(target=scout_markets, args=(command_ship_name, False))
     x.start()
 
     y = threading.Thread(target=dbFunctions.populate_waypoints, args=(all_systems,))

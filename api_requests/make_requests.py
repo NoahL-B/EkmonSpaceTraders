@@ -19,6 +19,19 @@ def rate_limit_retry(func, max_tries=10):
     return wrapper
 
 
+def server_error_retry(func, max_tries=10):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        tries = 1
+        handler = args[0]
+        while 500 <= result.status_code <= 599 and tries < max_tries:
+            tries += 1
+            result = func(*args, **kwargs)
+        handler.successful_request_count += 1
+        handler.pacing_src += 1
+        return result
+    return wrapper
+
 def print_builder(*args, min_spaces=2, spaces=7):
     out_str = ""
     for a in args:
@@ -179,6 +192,7 @@ class RequestHandler:
     def patch(self, endpoint: str, params: dict = None, headers: dict = None, token: str = None, priority="NORMAL"):
         return self.__queue_request(self.__make_request, ("PATCH", endpoint, params, headers, token), priority=priority)
 
+    @server_error_retry
     @rate_limit_retry
     def __make_request(self, request_type: str, endpoint: str, params: dict = None, headers: dict = None, token: str = None):
         if request_type not in ["GET", "POST", "PATCH"]:

@@ -1,6 +1,6 @@
 from api_requests.make_requests import RequestHandler
 
-RH = RequestHandler()
+RH = RequestHandler(printouts=False)
 
 
 ### OVERALL REQUESTS ###
@@ -201,7 +201,7 @@ def patch_ship_nav(token: str, shipSymbol: str, flightMode: str, priority: str =
     payload = {
         "flightMode": flightMode
     }
-    response = RH.post("my/ships/" + shipSymbol + "/nav", payload, token=token, priority=priority).json()
+    response = RH.patch("my/ships/" + shipSymbol + "/nav", payload, token=token, priority=priority).json()
     return response
 
 
@@ -267,7 +267,7 @@ def transfer_cargo(token: str, fromShipSymbol: str, toShipSymbol: str, tradeSymb
         "units": units,
         "shipSymbol": toShipSymbol
     }
-    response = RH.post("my/ships/" + fromShipSymbol + "/purchase", payload, token=token, priority=priority).json()
+    response = RH.post("my/ships/" + fromShipSymbol + "/transfer", payload, token=token, priority=priority).json()
     return response
 
 

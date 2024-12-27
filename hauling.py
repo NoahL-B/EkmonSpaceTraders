@@ -204,7 +204,14 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
 
     while num_to_buy >= trade_volume and (not max_buy_price or origin_target_good['purchasePrice'] < max_buy_price):
         p = purchase(ship, product, trade_volume)
-        num_to_buy -= trade_volume
+
+        if not p or 'data' not in p.keys():
+            a = api.get_agent(TOKEN)
+            c = a['data']['credits']
+            num_can_buy = c // origin_target_good['purchasePrice']
+            num_to_buy = min(num_can_buy, num_to_buy)
+        else:
+            num_to_buy -= trade_volume
 
         origin_target_good = None
         origin_trade_goods = dbFunctions.access_get_market(origin_waypoint)
@@ -216,7 +223,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
     if num_to_buy > 0 and (not max_buy_price or origin_target_good['purchasePrice'] < max_buy_price):
         p = purchase(ship, product, num_to_buy)
 
-    if p:
+    if p and 'data' in p.keys():
         cargo = p['data']['cargo']
     else:
         cargo = get_ship(ship)['data']['cargo']
@@ -320,7 +327,7 @@ def sell_off_existing_cargo(ship):
             sale_locations[sell_location] = [item]
 
     for location in sale_locations.keys():
-        # print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
+        print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
         auto_nav(ship, location)
         dock(ship)
         for item in sale_locations[location]:

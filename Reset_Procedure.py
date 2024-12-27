@@ -2,7 +2,7 @@ import datetime as dt
 import os
 import shutil
 
-from SHARED import cursor
+from __SHARED import cursor
 from __SECRETS import UNAME, EMAIL
 import api_requests.raw_api_requests as rar
 

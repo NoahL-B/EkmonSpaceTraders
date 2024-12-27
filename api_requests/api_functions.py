@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 
 import api_requests.raw_api_requests as raw_api_requests
-from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, sell_cargo, scan_systems, scan_waypoints, scan_ships, refuel_ship, purchase_cargo, transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_shipyard, get_jump_gate, get_construction_site, supply_construction_site
+from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_shipyard, get_jump_gate, get_construction_site, supply_construction_site
 from database.dbFunctions import access_record_market
 
 
@@ -23,6 +23,30 @@ def get_all_contracts(token: str):
         page = list_contracts(token, page=page_num)
         all_contracts.extend(page["data"])
     return all_contracts
+
+
+def get_credits(token: str):
+    a = get_agent(token)
+    c = a['data']['credits']
+    return c
+
+
+def purchase_cargo(token: str, shipSymbol: str, symbol: str, units: int, priority: str = "NORMAL"):
+    result = raw_api_requests.purchase_cargo(token, shipSymbol, symbol, units, priority)
+    if 'data' in result.keys():
+        waypoint = result['data']['transaction']['waypointSymbol']
+        system = waypoint_name_to_system_name(waypoint)
+        get_market(token, system, waypoint)
+    return result
+
+
+def sell_cargo(token: str, shipSymbol: str, symbol: str, units: int, priority: str = "NORMAL"):
+    result = raw_api_requests.sell_cargo(token, shipSymbol, symbol, units, priority)
+    if 'data' in result.keys():
+        waypoint = result['data']['transaction']['waypointSymbol']
+        system = waypoint_name_to_system_name(waypoint)
+        get_market(token, system, waypoint)
+    return result
 
 
 def get_all_ships(token: str):
