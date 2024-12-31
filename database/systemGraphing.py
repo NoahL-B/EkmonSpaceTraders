@@ -1,25 +1,77 @@
 import dijkstar
 from dijkstar import Graph, find_path
-from database.dbFunctions import distance
+
+# import api_requests.api_functions
+from database.dbFunctions import distance, access_get_available_jumps
 
 
-def make_dij_graph(all_systems, warp_drive=True):
+
+MASTER_JUMP_GRAPH = None
+MASTER_WARP_GRAPH = None
+
+
+def init_master_jump_graph(force_new=False):
+    global MASTER_JUMP_GRAPH
+    if MASTER_JUMP_GRAPH is None or force_new:
+        import database.dbFunctions as DBF
+        all_systems = DBF.access_get_detailed_systems()
+        MASTER_JUMP_GRAPH = make_dij_graph(all_systems, False)
+
+    return MASTER_JUMP_GRAPH
+
+
+def init_master_warp_graph(force_new=False):
+    global MASTER_WARP_GRAPH
+    if MASTER_WARP_GRAPH is None or force_new:
+        import database.dbFunctions as DBF
+        all_systems = DBF.access_get_detailed_systems()
+        MASTER_WARP_GRAPH = make_dij_graph(all_systems, True)
+
+    return MASTER_WARP_GRAPH
+
+
+def make_dij_graph(all_systems, warp_drive=False, engine_speed=30, warp_range=6000, warp_speed="DRIFT"):
     dij = Graph()
-    for s1 in all_systems:
-        has_gate_1 = False
-        for wp in s1["waypoints"]:
-            if wp["type"] == "JUMP_GATE":
-                has_gate_1 = True
-        for s2 in all_systems:
-            has_gate_2 = False
-            for wp in s2["waypoints"]:
-                if wp["type"] == "JUMP_GATE":
-                    has_gate_2 = True
-            dist = distance(s1, s2)
-            if has_gate_1 and has_gate_2 and dist < 2000:
-                dij.add_edge(s1["symbol"], s2["symbol"], 1)
-            elif warp_drive:
-                dij.add_edge(s1["symbol"], s2["symbol"], dist)
+
+    sys_dict = {}
+    for s in all_systems:
+        sys_name = s["symbol"]
+        sys_dict[sys_name] = s
+
+    def warp_time(dist):
+        warp_multiplier = 10000
+        if warp_speed == "DRIFT":
+            warp_multiplier = 300
+        elif warp_speed == "CRUISE":
+            warp_multiplier = 50
+        elif warp_speed == "BURN":
+            warp_multiplier = 25
+        elif warp_speed == "STEALTH":
+            warp_multiplier = 30
+
+        travel_time = round(dist * warp_multiplier / engine_speed + 15)
+        return travel_time
+
+    if warp_drive:
+        for s1 in all_systems:
+            for s2 in all_systems:
+                if s1 is not s2:
+                    dist = distance(s1, s2)
+                    if dist <= warp_range:
+                        travel_time = warp_time(dist)
+                        dij.add_edge(s1["symbol"], s2["symbol"], travel_time)
+
+    jumps = access_get_available_jumps()
+    for jump in jumps:
+        origin_system = jump[2]
+        destination_system = jump[4]
+
+        dist = distance(sys_dict[origin_system], sys_dict[destination_system])
+        cooldown_time = dist + 60
+
+        dij.add_edge(origin_system, destination_system, cooldown_time)
+        dij.add_edge(destination_system, origin_system, cooldown_time)
+
     return dij
 
 
@@ -54,3 +106,10 @@ def get_jump_networks(all_systems):
             all_networks.append(csl)
     system_counted["all_networks"] = all_networks
     return system_counted
+
+
+init_master_jump_graph()
+
+
+if __name__ == '__main__':
+    print(MASTER_JUMP_GRAPH)

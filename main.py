@@ -4,6 +4,7 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 
+import api_requests.raw_api_requests
 import economy
 from SECRETS import TOKEN
 from SHARED import *
@@ -12,6 +13,7 @@ from SHARED import *
 import database.waypointGraphing as waypointGraphing
 import database.dbFunctions as dbFunctions
 from database.Waypoint import Waypoint, getWaypoint
+from database.systemGraphing import *
 
 SYSTEM = ""
 ASTEROIDS = ""
@@ -161,7 +163,7 @@ def auto_nav(ship, destination):
         for t in destination_wp['traits']:
             if t['symbol'] == "MARKETPLACE":
                 destination_market = True
-        if origin_market and not destination_market and fuel < fuel_cap:
+        if origin_market and (fuel <= 5 or not destination_market and fuel < fuel_cap):
             dock(ship)
             refuel(ship)
             orbit(ship)
@@ -303,21 +305,79 @@ def auto_jump_warp(ship, destination_system):
             print("No jump gate is available, and", ship, "cannot warp!")
 
     auto_nav(ship, local_jump_gate)
-    jump_gate_stats = get_jump_gate(origin_system, local_jump_gate)
-    jumped = False
-    for c in jump_gate_stats['data']['connections']:
-        if not jumped:
-            if destination_system in c:
-                jump(ship, c, True)
-                jumped = True
-    if not jumped:
+    jump_graph = init_master_jump_graph()
+    jump_path = dij_path(jump_graph, origin_system, destination_system)
+    if jump_path is not None:
+
+        jump_num = 0
+        while jump_num < len(jump_path.edges):
+
+            local_jump_gate, next_jump_gate = dbFunctions.jump_connection_exists(jump_path.nodes[jump_num], jump_path.nodes[jump_num + 1])
+            jump_num += 1
+            if jump_num < len(jump_path.edges):
+                jump(ship, next_jump_gate, True)
+            else:
+                jump(ship, next_jump_gate, False)
+
+    else:
         if can_warp:
-            api_functions.patch_ship_nav(TOKEN, ship, "DRIFT")
-            waypoints = dbFunctions.get_waypoints_from_access(destination_system)
-            destination_waypoint = random.choice(waypoints)['symbol']
-            warp(ship, destination_waypoint, False)
-            api_functions.patch_ship_nav(TOKEN, ship, "BURN")
-            sleep_until_arrival(ship)
+            jump_warp_graph = init_master_warp_graph()
+            jump_warp_path = dij_path(jump_warp_graph, origin_system, destination_system)
+
+
+            travel_num = 0
+
+            while travel_num < len(jump_warp_path.edges):
+
+                this_system = jump_warp_path.nodes[travel_num]
+                next_system = jump_warp_path.nodes[travel_num + 1]
+
+
+                jump_info = dbFunctions.jump_connection_exists(this_system, next_system)
+
+                this_waypoint = None
+                next_waypoint = None
+
+                successfully_jumped = False
+
+                # try to jump. Can fail if either side of the jump gate has not been built.
+                # note that the path finding algorithm accounts for whether it will be able to successfully jump here, not whether it tries to jump here.
+                if jump_info:
+                    this_waypoint, next_waypoint = jump_info
+                    auto_nav(ship, this_waypoint)
+
+                    cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
+                    time.sleep(api_functions.cooldown_to_time_delay(cooldown))
+
+                    result = jump(ship, next_waypoint, False)
+                    if "data" in result.keys():
+                        successfully_jumped = True
+
+                # warp if there was a missing jump gate, or if the jump failed to a jump gate still being built.
+                if not successfully_jumped:
+                    following_system = None
+                    if travel_num < len(jump_warp_path.nodes - 2):
+                        following_system = jump_warp_path.nodes[travel_num + 2]
+                    following_jump_info = None
+                    if following_system is not None:
+                        following_jump_info = dbFunctions.jump_connection_exists(next_system, following_system)
+
+                    if following_jump_info:
+                        next_waypoint = following_jump_info[0]
+
+                    if next_waypoint is None:
+                        waypoints = dbFunctions.get_waypoints_from_access(next_system)
+                        next_waypoint = random.choice(waypoints)['symbol']
+
+                    api_functions.patch_ship_nav(TOKEN, ship, "DRIFT")
+                    warp(ship, next_waypoint, False)
+                    api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                    sleep_until_arrival(ship)
+
+
+
+                travel_num += 1
+
         else:
             print("Too complicated a jump/warp to complete")
 
@@ -462,6 +522,8 @@ def chart_wp(ship):
 
 def minerLoop(ship, lock=None, surveys=None):
     orbit(ship)
+    cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
+    time.sleep(api_functions.cooldown_to_time_delay(cooldown))
     timeSinceLast = datetime.now()
     while True:
         new_time = datetime.now()
@@ -644,6 +706,8 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
                         pass  # print(hauler + ': ' + str(c))
 
                     full = c['units'] >= capacity * 0.9
+                    if not full:
+                        time.sleep(20)
 
             finally:
                 lock.release()
@@ -918,7 +982,7 @@ def commandPhaseB(ship, system=None):
                 marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material, imports=False, exchange=False)
                 if len(marketplaces) == 0:
                     marketplaces = dbFunctions.search_marketplaces_for_item(waypoints, material)
-                purchase_location = marketplaces[0]['symbol']
+                purchase_location = random.choice(marketplaces)['symbol']
                 hauling.trade_cycle(ship, material, system, purchase_location, construction_site, "CONSTRUCTION", stop_on_unprofitable_origin=max_cost)
                 hauling.trade_cycle(ship, material, system, purchase_location, construction_site, "CONSTRUCTION")
 
@@ -1093,7 +1157,7 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
     while True:
         if len(surveys) < max_num_surveys:
             new_survey = createSurvey(ship)
-            if new_survey is not False:
+            if "data" in new_survey.keys():
                 cooldown = new_survey["data"]["cooldown"]["totalSeconds"]
                 survey_list = new_survey["data"]["surveys"]
                 good_surveys = []
@@ -1122,7 +1186,7 @@ def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
             else:
                 time.sleep(60)
         else:
-            time.sleep(150)
+            time.sleep(60)
 
 
 material_values = {

@@ -38,6 +38,14 @@ def fill_table_defaults():
     y.start()
     y.join()
 
+    y = threading.Thread(target=dbFunctions.populate_shipyards)
+    y.start()
+    y.join()
+
+    y = threading.Thread(target=dbFunctions.populate_jump_gates)
+    y.start()
+    y.join()
+
 
 
 

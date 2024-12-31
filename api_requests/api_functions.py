@@ -2,14 +2,28 @@ from datetime import datetime
 import time
 
 import api_requests.raw_api_requests as raw_api_requests
-from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_shipyard, get_jump_gate, get_construction_site, supply_construction_site
-from database.dbFunctions import access_record_market
+from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site
+from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate
 
 
 def waypoint_name_to_system_name(waypoint_name: str):
     name_list = waypoint_name.split("-")
     system_name = name_list[0] + "-" + name_list[1]
     return system_name
+
+
+def get_jump_gate(token: str | None, systemSymbol: str, waypointSymbol: str, priority: str = "NORMAL"):
+    jump_gate = raw_api_requests.get_jump_gate(token, systemSymbol, waypointSymbol, priority)
+    if "data" in jump_gate.keys():
+        access_record_jump_gate(jump_gate)
+    return jump_gate
+
+
+def get_shipyard(token: str | None, systemSymbol: str, waypointSymbol: str, priority: str = "NORMAL"):
+    shipyard = raw_api_requests.get_shipyard(token, systemSymbol, waypointSymbol, priority)
+    if "data" in shipyard.keys():
+        access_record_shipyard(shipyard)
+    return shipyard
 
 
 def get_all_contracts(token: str):
@@ -77,8 +91,20 @@ def nav_to_time_delay(nav):
         diff = end_dt - start_dt
         sec = diff.total_seconds()
         return sec
-    except TypeError:
+    except (TypeError, KeyError):
+        print("NAV ERROR:", nav)
         return 60
+
+
+def cooldown_to_time_delay(cooldown):
+    if not cooldown:
+        return 0
+    try:
+        sec = cooldown["data"]["remainingSeconds"]
+        return sec
+    except TypeError or KeyError:
+        print("COOLDOWN ERROR:", cooldown)
+        return 70
 
 
 def navigate(token, ship, location, nav_and_sleep=False):
@@ -110,9 +136,19 @@ def navigate(token, ship, location, nav_and_sleep=False):
 
 
 def findShipyard(system, ship_type):
-    from database.dbFunctions import get_waypoints_from_access
+    from database.dbFunctions import get_waypoints_from_access, get_shipyards_from_access
 
     waypoints = get_waypoints_from_access(system)
+    shipyards = get_shipyards_from_access()
+
+    for shipyard in shipyards:
+        if system in shipyard["symbol"]:
+            for shipType in shipyard["shipTypes"]:
+                if shipType["type"] == ship_type:
+                    return shipyard["symbol"]
+
+    print("Something messed up in the findShipyard routine. Trying something else...")
+
     for wp in waypoints:
         for t in wp['traits']:
             if t['symbol'] == "SHIPYARD":

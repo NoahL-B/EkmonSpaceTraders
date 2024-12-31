@@ -1,6 +1,6 @@
 from api_requests.make_requests import RequestHandler
 
-RH = RequestHandler(printouts=False)
+RH = RequestHandler(printouts=True)
 
 
 ### OVERALL REQUESTS ###
@@ -143,8 +143,11 @@ def create_chart(token: str, shipSymbol: str, priority: str = "NORMAL"):
 
 
 def get_ship_cooldown(token: str, shipSymbol: str, priority: str = "NORMAL"):
-    response = RH.get("my/ships/" + shipSymbol + "/cooldown", token=token, priority=priority).json()
-    return response
+    response = RH.get("my/ships/" + shipSymbol + "/cooldown", token=token, priority=priority)
+    if response.status_code == 204:
+        return False
+    else:
+        return response.json()
 
 
 def dock_ship(token: str, shipSymbol: str, priority: str = "NORMAL"):
