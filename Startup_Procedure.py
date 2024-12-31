@@ -21,9 +21,9 @@ def fill_table_defaults():
             dbFunctions.populate_waypoints([s])
             dbFunctions.populate_markets()
 
-    otherFunctions.patchShipNav(command_ship_name, "BURN")
+    api_functions.patch_ship_nav(TOKEN, command_ship_name, "BURN")
 
-    x = threading.Thread(target=scout_markets(command_ship_name, False))
+    x = threading.Thread(target=scout_markets, args=(command_ship_name, False))
     x.start()
 
     y = threading.Thread(target=dbFunctions.populate_waypoints, args=(all_systems,))
@@ -35,6 +35,14 @@ def fill_table_defaults():
 
     y.join()
     y = threading.Thread(target=dbFunctions.populate_markets)
+    y.start()
+    y.join()
+
+    y = threading.Thread(target=dbFunctions.populate_shipyards)
+    y.start()
+    y.join()
+
+    y = threading.Thread(target=dbFunctions.populate_jump_gates)
     y.start()
     y.join()
 

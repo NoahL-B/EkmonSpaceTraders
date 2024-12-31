@@ -2,11 +2,10 @@ import datetime as dt
 import os
 import shutil
 
-from SHARED import cursor
-from SpacePyTraders import client
+from __SHARED import cursor
 from __SECRETS import UNAME, EMAIL
+import api_requests.raw_api_requests as rar
 
-myClient = client.Client("", "")
 
 UTC_NOW = dt.datetime.now(dt.timezone.utc)
 TARGET_UNAME = UNAME
@@ -42,21 +41,14 @@ def copy_old_data():
 
 
 def clear_db():
-    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts", "ShipAssignments"]:
+    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts", "ShipAssignments", "JumpGates", "Shipyards"]:
         cmd = "DELETE FROM {};".format(table_name) # noqa
         cursor.execute(cmd)
 
 
 def new_secrets():
-    endpoint = "v2/register"
-    params = {
-        "faction": STARTING_FACTION,
-        "symbol": TARGET_UNAME
-    }
-    if EMAIL is not None:
-        params["email"] = EMAIL
-    response = myClient.generic_api_call("POST", endpoint, params, "")
-    if not response:
+    response = rar.register_new_agent(STARTING_FACTION, TARGET_UNAME, EMAIL)
+    if "data" not in response.keys():
         print("Failed to register new agent")
         return response
     token = response["data"]["token"]

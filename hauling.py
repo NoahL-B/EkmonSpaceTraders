@@ -1,4 +1,5 @@
 from main import *
+from api_requests import api_functions as api
 import economy
 
 
@@ -17,7 +18,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
         auto_nav(ship, origin_waypoint)
         dock(ship)
 
-        origin_market = otherFunctions.getMarket(system, origin_waypoint)
+        origin_market = api.get_market(TOKEN, system, origin_waypoint)
 
         origin_target_good = None
         origin_trade_goods = origin_market['data']['tradeGoods']
@@ -78,7 +79,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
 
         if destination_type == 'MARKET':
 
-            destination_market = otherFunctions.getMarket(system, destination_waypoint)
+            destination_market = api.get_market(TOKEN, system, destination_waypoint)
 
             target_good = None
             trade_goods = destination_market['data']['tradeGoods']
@@ -150,7 +151,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
             num_to_deliver = min(num_required, num_to_offload)
             if num_to_deliver == 0:
                 print('Completed contract for this product')
-                fulfill = otherFunctions.fulfillContract(contract_map['id'])
+                fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
                 if fulfill:
                     print('Completed entire contract')
                 return
@@ -173,7 +174,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
     auto_nav(ship, origin_waypoint)
     dock(ship)
 
-    origin_market = otherFunctions.getMarket(system, origin_waypoint)
+    origin_market = api.get_market(TOKEN, system, origin_waypoint)
     origin_target_good = None
     origin_trade_goods = origin_market['data']['tradeGoods']
 
@@ -203,7 +204,14 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
 
     while num_to_buy >= trade_volume and (not max_buy_price or origin_target_good['purchasePrice'] < max_buy_price):
         p = purchase(ship, product, trade_volume)
-        num_to_buy -= trade_volume
+
+        if not p or 'data' not in p.keys():
+            a = api.get_agent(TOKEN)
+            c = a['data']['credits']
+            num_can_buy = c // origin_target_good['purchasePrice']
+            num_to_buy = min(num_can_buy, num_to_buy)
+        else:
+            num_to_buy -= trade_volume
 
         origin_target_good = None
         origin_trade_goods = dbFunctions.access_get_market(origin_waypoint)
@@ -215,7 +223,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
     if num_to_buy > 0 and (not max_buy_price or origin_target_good['purchasePrice'] < max_buy_price):
         p = purchase(ship, product, num_to_buy)
 
-    if p:
+    if p and 'data' in p.keys():
         cargo = p['data']['cargo']
     else:
         cargo = get_ship(ship)['data']['cargo']
@@ -278,7 +286,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
         num_to_deliver = min(num_required, num_to_offload)
         if num_to_deliver == 0:
             print('Completed contract for this product')
-            fulfill = otherFunctions.fulfillContract(contract_map['id'])
+            fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
             if fulfill:
                 print('Completed entire contract')
             return
@@ -319,7 +327,7 @@ def sell_off_existing_cargo(ship):
             sale_locations[sell_location] = [item]
 
     for location in sale_locations.keys():
-        # print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
+        print("Flying", ship, "from", ship_stats['data']['nav']['waypointSymbol'], 'to', location, 'transporting', len(sale_locations[location]), 'item(s) to a MARKET')
         auto_nav(ship, location)
         dock(ship)
         for item in sale_locations[location]:

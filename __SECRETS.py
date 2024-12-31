@@ -1,7 +1,8 @@
 import pyodbc
 import os
 
-UNAME = "EKMON"
+UNAME = "EKMON3"
+EMAIL = "awesomeguynitlib@gmail.com"
 
 base_path = os.path.dirname(__file__)
 db_path = os.path.join(base_path, "SpaceTradersDatabase.accdb")
@@ -13,7 +14,10 @@ cursor = conn.cursor()
 cmd = "SELECT TOKEN FROM ID WHERE ((UNAME = '{0}'));".format(UNAME)  # noqa
 cursor.execute(cmd)
 
-TOKEN = next(cursor)[0]
+try:
+    TOKEN = next(cursor)[0]
+except StopIteration as e:
+    TOKEN = ""
 
 cursor.close()
 
