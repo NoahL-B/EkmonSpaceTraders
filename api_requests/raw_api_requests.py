@@ -1,3 +1,5 @@
+import json
+
 from api_requests.make_requests import RequestHandler
 
 RH = RequestHandler(printouts=True)
@@ -115,7 +117,13 @@ def purchase_ship(token: str, shipType: str, waypointSymbol: str, priority: str 
 
 
 def get_ship(token: str, shipSymbol: str, priority: str = "NORMAL"):
-    response = RH.get("my/ships/" + shipSymbol, token=token, priority=priority).json()
+    response = RH.get("my/ships/" + shipSymbol, token=token, priority=priority)
+    try:
+        response = response.json()
+    except json.decoder.JSONDecodeError as e:
+        print("I DON'T KNOW HOW THIS ERROR IS HAPPENING! :(")
+        raise e
+
     return response
 
 
@@ -270,7 +278,13 @@ def transfer_cargo(token: str, fromShipSymbol: str, toShipSymbol: str, tradeSymb
         "units": units,
         "shipSymbol": toShipSymbol
     }
-    response = RH.post("my/ships/" + fromShipSymbol + "/transfer", payload, token=token, priority=priority).json()
+    response = RH.post("my/ships/" + fromShipSymbol + "/transfer", payload, token=token, priority=priority)
+    try:
+        response = response.json()
+    except json.decoder.JSONDecodeError as e:
+        print("!!!!!!")
+        raise e
+
     return response
 
 

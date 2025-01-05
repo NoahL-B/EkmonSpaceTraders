@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 
 import api_requests.raw_api_requests as raw_api_requests
-from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site
+from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
 from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate
 
 
@@ -66,10 +66,10 @@ def sell_cargo(token: str, shipSymbol: str, symbol: str, units: int, priority: s
 def get_all_ships(token: str):
     page_num = 1
     page = list_ships(token, page=page_num)
-    num_contracts = page["meta"]["total"]
+    num_ships = page["meta"]["total"]
     all_ships = page["data"]
 
-    while num_contracts > len(all_ships):
+    while num_ships > len(all_ships):
         page_num += 1
         page = list_ships(token, page=page_num)
         all_ships.extend(page["data"])
@@ -91,26 +91,29 @@ def nav_to_time_delay(nav):
         diff = end_dt - start_dt
         sec = diff.total_seconds()
         return sec
-    except (TypeError, KeyError):
+    except (TypeError, KeyError) as e:
+        if "error" in nav.keys() and nav["error"]["code"] == 4214:
+            sec = nav["error"]["data"]["secondsToArrival"]
+            return sec
         print("NAV ERROR:", nav)
-        return 60
+        raise e
 
 
 def cooldown_to_time_delay(cooldown):
-    if not cooldown:
+    if not cooldown:  # Occurs when cooldown returns a 204 response instead of a 200 response
         return 0
     try:
         sec = cooldown["data"]["remainingSeconds"]
         return sec
-    except TypeError or KeyError:
+    except TypeError or KeyError as e:
         print("COOLDOWN ERROR:", cooldown)
-        return 70
+        raise e
 
 
 def navigate(token, ship, location, nav_and_sleep=False):
     to_return = navigate_ship(token, ship, location)
 
-    if not to_return:
+    if "data" not in to_return.keys():
         ship_status = get_ship(token, ship)
         nav = ship_status['data']['nav']
         if nav['status'] == 'IN_TRANSIT':
@@ -138,7 +141,6 @@ def navigate(token, ship, location, nav_and_sleep=False):
 def findShipyard(system, ship_type):
     from database.dbFunctions import get_waypoints_from_access, get_shipyards_from_access
 
-    waypoints = get_waypoints_from_access(system)
     shipyards = get_shipyards_from_access()
 
     for shipyard in shipyards:
@@ -149,6 +151,7 @@ def findShipyard(system, ship_type):
 
     print("Something messed up in the findShipyard routine. Trying something else...")
 
+    waypoints = get_waypoints_from_access(system)
     for wp in waypoints:
         for t in wp['traits']:
             if t['symbol'] == "SHIPYARD":
@@ -160,16 +163,20 @@ def findShipyard(system, ship_type):
 
 def buyShip(token: str, shipyard: str, shipType: str):
     purchasedShip = purchase_ship(token, shipType, shipyard)
-    shipName = purchasedShip["data"]["ship"]["symbol"]
-    orbit_ship(token, shipName)
-    patch_ship_nav(token, shipName, "BURN")
-    print("Purchased new ship:", shipName)
-    return shipName
+    if "data" in purchasedShip.keys():
+        shipName = purchasedShip["data"]["ship"]["symbol"]
+        orbit_ship(token, shipName)
+        patch_ship_nav(token, shipName, "BURN")
+        print("Purchased new ship:", shipName)
+        return shipName
+    else:
+        return purchasedShip
 
 
-def get_market(token, systemSymbol, waypointSymbol):
-    market_obj = raw_api_requests.get_market(token, systemSymbol, waypointSymbol)
-    access_record_market(market_obj)
+def get_market(token, systemSymbol, waypointSymbol, priority="NORMAL"):
+    market_obj = raw_api_requests.get_market(token, systemSymbol, waypointSymbol, priority)
+    if "data" in market_obj.keys():
+        access_record_market(market_obj)
     return market_obj
 
 

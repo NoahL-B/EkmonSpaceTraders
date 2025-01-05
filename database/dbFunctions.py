@@ -55,6 +55,7 @@ UNCHARTED_TRAIT_DICT = {
         "description": "An unexplored region of space, full of potential discoveries and hidden dangers."
       }
 
+
 def waypoint_to_sql_2(wp):
     if UNCHARTED_TRAIT_DICT in wp.traits:
         return False
@@ -76,6 +77,7 @@ def waypoint_to_sql_2(wp):
     cmd += " WHERE (Waypoint.symbol='" + wp.symbol + "');"
 
     return cmd
+
 
 def distance(system_1, system_2):
     x1 = system_1["x"]
@@ -129,7 +131,8 @@ def find_all_with_trait(all_systems, target_trait):
                     wp_list.append(wp)
         counter += 1
         if counter % 25 == 0:
-            print(len(wp_list), "/", counter)
+            pass
+            # print(len(wp_list), "/", counter)
     return wp_list
 
 
@@ -142,7 +145,8 @@ def find_all_with_trait_2(all_waypoints, target_trait):
                 wp_list.append(wp)
         counter += 1
         if counter % 25 == 0:
-            print(len(wp_list), "/", counter)
+            pass
+            # print(len(wp_list), "/", counter)
     len(wp_list), "/", counter
     return wp_list
 
@@ -560,8 +564,15 @@ def get_waypoints_from_access(system=None):
     waypoints = []
 
     DB_LOCK.acquire()
+    params = ()
+
+    cmd = "SELECT * FROM (Waypoint LEFT JOIN Charts ON (Waypoint.symbol = Charts.WaypointSymbol))"
+    if system:
+        cmd += 'WHERE ((Waypoint.systemSymbol)=?)'
+        params = (system,)
+
     try:
-        cursor.execute("SELECT * FROM (Waypoint LEFT JOIN Charts ON (Waypoint.symbol = Charts.WaypointSymbol))")
+        cursor.execute(cmd, params)
 
         for raw_wp in cursor:
             if system is None or raw_wp[2] == system:
@@ -618,34 +629,45 @@ def get_ship_roles_from_access():
     return ship_roles
 
 
-def get_markets_from_access():
+def get_markets_from_access(system=None):
     marketplaces = {}
+
+    cmd = "SELECT * FROM Markets"
+    params = ()
+    if system is not None:
+        params = (system, )
+        cmd = "SELECT Markets.* FROM Waypoint INNER JOIN Markets ON Waypoint.symbol = Markets.Waypoint WHERE (((Waypoint.systemSymbol)=?));"
+
+
     DB_LOCK.acquire()
 
     try:
-        cursor.execute("SELECT * FROM Markets")
+        cursor.execute(cmd, params)
         for marketplace_entry in cursor:
             waypoint_symbol = marketplace_entry[1]
-            if waypoint_symbol not in marketplaces.keys():
-                marketplaces[waypoint_symbol] = {
-                    "symbol": waypoint_symbol,
-                    "tradeGoods": []
+            this_system = api.waypoint_name_to_system_name(waypoint_symbol)
+            if system is None or this_system == system:
+                if waypoint_symbol not in marketplaces.keys():
+                    marketplaces[waypoint_symbol] = {
+                        "symbol": waypoint_symbol,
+                        "tradeGoods": []
+                    }
+                trade_good = {
+                    "symbol": marketplace_entry[2],
+                    "tradeVolume": 1,
+                    "supply": "NOT SET",
+                    "purchasePrice": 99999,
+                    "sellPrice": 0,
+                    "type": "NOT SET"
                 }
-            trade_good = {
-                "symbol": marketplace_entry[2],
-                "tradeVolume": 1,
-                "supply": "NOT SET",
-                "purchasePrice": 99999,
-                "sellPrice": 0,
-                "type": "NOT SET"
-            }
-            if marketplace_entry[3] > 0:
-                trade_good["tradeVolume"] = marketplace_entry[3]
-                trade_good["supply"] = marketplace_entry[4]
-                trade_good["purchasePrice"] = marketplace_entry[5]
-                trade_good["sellPrice"] = marketplace_entry[6]
-                trade_good["type"] = marketplace_entry[8]
-            marketplaces[waypoint_symbol]["tradeGoods"].append(trade_good)
+                if marketplace_entry[3] > 0:
+                    trade_good["tradeVolume"] = marketplace_entry[3]
+                    trade_good["supply"] = marketplace_entry[4]
+                    trade_good["purchasePrice"] = marketplace_entry[5]
+                    trade_good["sellPrice"] = marketplace_entry[6]
+                    trade_good["timeStamp"] = marketplace_entry[7]
+                    trade_good["type"] = marketplace_entry[8]
+                marketplaces[waypoint_symbol]["tradeGoods"].append(trade_good)
     finally:
         DB_LOCK.release()
 
@@ -940,6 +962,11 @@ def access_record_low_info_market(market_dict):
 
         if not entry_present:
             access_insert_entry("Markets", ["Waypoint", "Symbol"], [waypoint, trade_good["symbol"]])
+
+
+def access_replenishing_trades(System):
+    cmd = "EXEC ReplenishingTrades @System = ?"
+
 
 
 if __name__ == '__main__':

@@ -9,28 +9,27 @@ def rate_limit_retry(func, max_tries=10):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         tries = 1
-        handler = args[0]
         while result.status_code == 429 and tries < max_tries:
             tries += 1
+            result_dict = result.json()
+            sleep_time = result_dict["error"]["data"]["retryAfter"]
+            time.sleep(sleep_time)
             result = func(*args, **kwargs)
-        handler.successful_request_count += 1
-        handler.pacing_src += 1
         return result
     return wrapper
 
 
-def server_error_retry(func, max_tries=10):
+def server_error_retry(func, max_tries=3):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         tries = 1
-        handler = args[0]
         while 500 <= result.status_code <= 599 and tries < max_tries:
             tries += 1
+            time.sleep(2 ** tries / 2)
             result = func(*args, **kwargs)
-        handler.successful_request_count += 1
-        handler.pacing_src += 1
         return result
     return wrapper
+
 
 def print_builder(*args, min_spaces=2, spaces=7):
     out_str = ""
@@ -75,14 +74,18 @@ class RequestHandler:
                 return
             self.queue_lock.release()
 
-            printout = print_builder(self.queue_len(), self.request_count, str(self.get_rpm())[:5], *args[:4])
             if self.printouts:
+                printout = print_builder(self.queue_len(), self.request_count, str(self.get_rpm())[:5], *args[:4])
                 with self.print_lock:
                     print(printout)
 
             self.request_lock.acquire()
-            result.append(func(*args, ))
-            self.request_lock.release()
+            try:
+                result.append(func(*args, ))
+                self.successful_request_count += 1
+                self.pacing_src += 1
+            finally:
+                self.request_lock.release()
 
         else:
             time.sleep(1)

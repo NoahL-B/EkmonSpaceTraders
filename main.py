@@ -224,11 +224,17 @@ def auto_nav(ship, destination):
 
         if not fueled_up and this_wp_market:
             dock(ship)
-            fueled_up = refuel(ship)
+            refuel_response = refuel(ship)
+            if "data" in refuel_response.keys():
+                fueled_up = True
+                fuel = refuel_response["data"]["fuel"]["current"]
             orbit(ship)
 
         if fueled_up:
             nav = navigate(ship, path.nodes[waypoint_num + 1], True)
+            if "data" not in nav.keys():
+                print(nav)
+                raise Exception("UNKNOWN NAV ERROR:" + str(nav))
             fuel = nav['data']['fuel']['current']
         else:
             start_speed = ship_stats['data']['nav']['flightMode']
@@ -241,6 +247,8 @@ def auto_nav(ship, destination):
             auto_nav(ship, path.nodes[waypoint_num + 1])
             print("Returning", ship, "to", start_speed, "speed")
             api_functions.patch_ship_nav(TOKEN, ship, start_speed)
+            if waypoint_num + 1 < len(path.edges):
+                fuel = get_ship(ship)["data"]["nav"]["fuel"]["current"]
 
         waypoint_num += 1
 
@@ -315,14 +323,27 @@ def auto_jump_warp(ship, destination_system):
             local_jump_gate, next_jump_gate = dbFunctions.jump_connection_exists(jump_path.nodes[jump_num], jump_path.nodes[jump_num + 1])
             jump_num += 1
             if jump_num < len(jump_path.edges):
+                cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
+                time.sleep(api_functions.cooldown_to_time_delay(cooldown))
                 jump(ship, next_jump_gate, True)
+                get_jump_gate(api_functions.waypoint_name_to_system_name(next_jump_gate), next_jump_gate)
             else:
                 jump(ship, next_jump_gate, False)
+                get_jump_gate(api_functions.waypoint_name_to_system_name(next_jump_gate), next_jump_gate)
 
     else:
         if can_warp:
             jump_warp_graph = init_master_warp_graph()
             jump_warp_path = dij_path(jump_warp_graph, origin_system, destination_system)
+
+            if jump_warp_path is None:
+                api_functions.patch_ship_nav(TOKEN, ship, "DRIFT")
+                waypoints = dbFunctions.get_waypoints_from_access(destination_system)
+                destination_waypoint = random.choice(waypoints)['symbol']
+                result = api_functions.warp_ship(TOKEN, ship, destination_waypoint)
+                api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                sleep_until_arrival(ship)
+                return
 
 
             travel_num = 0
@@ -345,6 +366,7 @@ def auto_jump_warp(ship, destination_system):
                 if jump_info:
                     this_waypoint, next_waypoint = jump_info
                     auto_nav(ship, this_waypoint)
+                    get_jump_gate(api_functions.waypoint_name_to_system_name(this_waypoint), this_waypoint)
 
                     cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
                     time.sleep(api_functions.cooldown_to_time_delay(cooldown))
@@ -356,7 +378,7 @@ def auto_jump_warp(ship, destination_system):
                 # warp if there was a missing jump gate, or if the jump failed to a jump gate still being built.
                 if not successfully_jumped:
                     following_system = None
-                    if travel_num < len(jump_warp_path.nodes - 2):
+                    if travel_num < len(jump_warp_path.nodes) - 2:
                         following_system = jump_warp_path.nodes[travel_num + 2]
                     following_jump_info = None
                     if following_system is not None:
@@ -539,7 +561,7 @@ def minerLoop(ship, lock=None, surveys=None):
                     survey = surveys.pop(0)
                 lock.release()
             extraction = extract(ship, survey)
-            if not extraction:
+            if "data" not in extraction.keys():
                 print(ship + ": " + str(extraction))
             elif extraction['data']['extraction']['yield']['units'] >= 0:
                 # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
@@ -576,7 +598,7 @@ def siphonLoop(ship):
             try:
                 extraction = siphon(ship)
                 cooldown = 60
-                if extraction:
+                if "data" in extraction.keys():
                     cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
                     num_units = extraction['data']['siphon']['yield']['units']
                     if num_units >= 0:
@@ -818,10 +840,7 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
         sleep_until_arrival(ship)
 
     if ship_stats['data']['nav']['systemSymbol'] != destination_system:
-        api_functions.patch_ship_nav(TOKEN, ship, "DRIFT")
-        warp(ship, shipyard_waypoint, False)
-        api_functions.patch_ship_nav(TOKEN, ship, "BURN")
-        sleep_until_arrival(ship)
+        auto_jump_warp(ship, destination_system)
     elif ship_stats['data']['nav']['waypointSymbol'] != shipyard_waypoint:
         auto_nav(ship, shipyard_waypoint)
 
@@ -832,11 +851,15 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
             hauler_count += 1
 
     while hauler_count < 3:
-        new_ship_name = api_functions.buyLightHauler(TOKEN, shipyard_waypoint)
-        dbFunctions.access_add_ship_assignment(new_ship_name, True, "TRADE_HAULER", destination_system)
-        x = threading.Thread(target=hauling.choose_trade_run_loop, args=(destination_system, new_ship_name, []), daemon=True)
-        x.start()
-        hauler_count += 1
+        new_ship = api_functions.buyLightHauler(TOKEN, shipyard_waypoint)
+        if type(new_ship) == str:
+            new_ship_name = new_ship
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, "TRADE_HAULER", destination_system)
+            hauler_count += 1
+        else:
+            while api_functions.get_credits(TOKEN) < 1000000:
+                scout_markets(ship)
+                hauling.choose_trade_run_loop(destination_system, ship, [], False)
     dbFunctions.access_update_ship_assignment(ship, assignmentType="MARKET_SCOUT")
 
 
@@ -1023,11 +1046,15 @@ def commandPhaseC(ship, system):
     ship_prices = {}
     for ship_type in ["SHIP_REFINING_FREIGHTER", "SHIP_EXPLORER"]:
         shipyard = api_functions.findShipyard(system, ship_type)
-        auto_nav(ship, shipyard)
-        shipyard_stats = api_functions.get_shipyard(TOKEN, system, shipyard)
-        for s in shipyard_stats['data']['ships']:
-            ship_prices[s['type']] = s['purchasePrice']
+        if shipyard is not None:
+            auto_nav(ship, shipyard)
+            shipyard_stats = api_functions.get_shipyard(TOKEN, system, shipyard)
+            for s in shipyard_stats['data']['ships']:
+                ship_prices[s['type']] = s['purchasePrice']
 
+    if "SHIP_EXPLORER" not in ship_prices.keys():
+        dbFunctions.access_update_ship_assignment(ship, True, "EXPLORER", system, api_functions.findShipyard(system, "SHIP_LIGHT_HAULER"))
+        return
 
     for s in ship_assignments:
         if s['assignmentType'] == "TRADE_HAULER" and s['systemSymbol'] == system:
@@ -1036,6 +1063,7 @@ def commandPhaseC(ship, system):
     while trade_haulers_desired > 0:
         while api_functions.get_agent(TOKEN)['data']['credits'] < ship_prices['SHIP_REFINING_FREIGHTER'] * 2:
             hauling.choose_trade_run_loop(system, ship, [], False)
+            scout_markets(ship, False)
         shipyard = api_functions.findShipyard(system, "SHIP_REFINING_FREIGHTER")
         auto_nav(ship, shipyard)
         new_ship_name = api_functions.buyRefiningFreighter(TOKEN, shipyard)
@@ -1071,6 +1099,7 @@ def commandPhaseC(ship, system):
     for ijg in incomplete_jump_gates:
         while api_functions.get_agent(TOKEN)['data']['credits'] < ship_prices['SHIP_EXPLORER'] * 2:
             hauling.choose_trade_run_loop(system, ship, [], False)
+            scout_markets(ship, False)
 
         destination_system = ijg['systemSymbol']
         destination_shipyard = api_functions.findShipyard(destination_system, "SHIP_LIGHT_HAULER")
@@ -1089,6 +1118,7 @@ def commandPhaseC(ship, system):
             if faction_system not in systems_with_assignments:
                 while api_functions.get_agent(TOKEN)['data']['credits'] < ship_prices['SHIP_EXPLORER'] * 2:
                     hauling.choose_trade_run_loop(system, ship, [], False)
+                    scout_markets(ship, False)
                 shipyard = api_functions.findShipyard(system, "SHIP_EXPLORER")
                 auto_nav(ship, shipyard)
                 new_ship_name = api_functions.buyExplorer(TOKEN, shipyard)
@@ -1301,6 +1331,70 @@ def scout_markets(ship, need_to_chart=True):
     print(ship, "finished scouting", num_to_scout, "market(s) in system", sys)
 
 
+def market_scout_master(ship, system):
+    def init_stationary_scout_dict():
+        stationary_scout_dict = {}
+
+        markets = dbFunctions.get_markets_from_access(system)
+
+        for m in markets:
+            stationary_scout_dict[m["symbol"]] = [None, m]
+
+        ship_roles = dbFunctions.get_ship_roles_from_access()
+
+        for ship_role in ship_roles:
+            if ship_role['hasAssignment'] and ship_role['assignmentType'] == "STATIONARY_SCOUT" and ship_role["systemSymbol"] == system:
+                stationary_scout_dict[ship_role["waypointSymbol"]][0] = ship_role["shipName"]
+        return stationary_scout_dict
+
+    def remote_check_in():
+
+        stationary_scout_dict = init_stationary_scout_dict()
+
+        shipyard = None
+
+        for waypoint, value in stationary_scout_dict.items():
+            ship_name, market = value
+            if ship_name is None:
+                if shipyard is None:
+                    shipyard = api_functions.findShipyard(system, "SHIP_PROBE")
+                    if shipyard is not None:
+                        auto_nav(ship, shipyard)
+                        dock(ship)
+                if shipyard is not None:
+                    ship_name = api_functions.buyProbe(TOKEN, shipyard)
+                    if type(ship_name) == str:
+                        stationary_scout_dict[waypoint] = ship_name
+                        dbFunctions.access_add_ship_assignment(ship_name, True, "STATIONARY_SCOUT", system, waypoint)
+                    else:
+                        ship_name = None
+                        break
+
+            time_to_check_in = True
+            if "timeStamp" in market["tradeGoods"][0].keys():
+                market_time = market["tradeGoods"][0]["timeStamp"]
+                market_time = market_time.replace(tzinfo=timezone.utc)
+                current_time = datetime.now(timezone.utc)
+                time_diff = current_time - market_time
+                if time_diff < timedelta(minutes=30):
+                    time_to_check_in = False
+
+            if time_to_check_in:
+                if ship_name is not None:
+                    market = api_functions.get_market(TOKEN, system, waypoint, priority="LOW")
+                    if "data" in market.keys():
+                        if "tradeGoods" not in market["data"].keys():
+                            navigate(ship_name, waypoint)
+
+    while True:
+        init_stationary_scout_dict()
+        remote_check_in()
+
+        scout_markets(ship, False)
+        time.sleep(1000)
+
+
+
 
 
 def main():
@@ -1317,7 +1411,6 @@ def main():
 
     mining_ships = {}
     siphon_ships = {}
-
 
     def make_thread(ship_role):
         t = None
@@ -1353,7 +1446,7 @@ def main():
                 else:
                     print("GAS GIANT REQUIRES PROGRAM RESTART TO FUNCTION")
             elif ship_role['assignmentType'] == "MARKET_SCOUT":
-                t = threading.Thread(target=scout_markets, args=(ship_role['shipName'],), daemon=True)
+                t = threading.Thread(target=market_scout_master, args=(ship_role['shipName'], ship_role["systemSymbol"]), daemon=True)
             elif ship_role['assignmentType'] == "EXPLORER":
                 t = threading.Thread(target=explorationRun, args=(ship_role['shipName'], ship_role['systemSymbol'], ship_role['waypointSymbol']), daemon=True)
             elif ship_role['assignmentType'] == "COMMAND_PHASE_A":
@@ -1362,7 +1455,7 @@ def main():
                 t = threading.Thread(target=commandPhaseB, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
             elif ship_role['assignmentType'] == "COMMAND_PHASE_C":
                 t = threading.Thread(target=commandPhaseC, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
-            elif ship_role['assignmentType'] == "":
+            elif ship_role['assignmentType'] in ["", "STATIONARY_SCOUT"]:
                 pass
             else:
                 print("No assignment function for", ship_role['assignmentType'])
@@ -1413,5 +1506,12 @@ def main():
 init_globals()
 
 if __name__ == '__main__':
-    main()
+    try:
+        from __SHARED import conn
+        main()
+    except KeyboardInterrupt as k:
+        dbFunctions.DB_LOCK.acquire()
+        conn.close()
+        raise k
+
 
