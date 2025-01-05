@@ -6,10 +6,6 @@ from database import Waypoint
 from database.System import *
 from SHARED import *
 from SECRETS import UNAME
-from threading import Lock
-
-
-DB_LOCK = Lock()
 
 
 
@@ -375,11 +371,9 @@ def populate_waypoint(wp_object, access_waypoint_symbols=None):
         needs_update = True
     cmd = waypoint_to_sql(wp_object, needs_update)
     if cmd:
-        DB_LOCK.acquire()
-        try:
+        with get_cursor() as cursor:
             cursor.execute(cmd)
-        finally:
-            DB_LOCK.release()
+
 
     if wp_object.chart is not None:
         record_chart(wp_object)
@@ -394,26 +388,22 @@ def populate_systems(all_systems):
     for s in all_systems:
         if s["symbol"] not in access_system_symbols:
             cmd = sector_to_sql(s)
-            DB_LOCK.acquire()
-            try:
+            with get_cursor() as cursor:
                 cursor.execute(cmd)
-            finally:
-                DB_LOCK.release()
+
 
 
 def record_chart(wp):
     chart = wp.chart
     symbol = wp.symbol
     cmd = "SELECT * FROM Charts WHERE (Charts.waypointSymbol='" + symbol + "');"
-    DB_LOCK.acquire()
 
-    try:
+    with get_cursor() as cursor:
         cursor.execute(cmd)
         needs_recording = False
         if cursor.fetchone() is None:
             needs_recording = True
-    finally:
-        DB_LOCK.release()
+
     all_factions = ["COSMIC", "VOID", "GALACTIC", "QUANTUM", "DOMINION", "ASTRO", "CORSAIRS", "OBSIDIAN", "AEGIS",
                     "UNITED", "SOLITARY", "COBALT", "OMEGA", "ECHO", "LORDS", "CULT", "ANCIENTS", "SHADOW", "ETHEREAL"]
     if needs_recording:
@@ -433,8 +423,7 @@ def record_chart(wp):
 def get_systems_from_access():
     raw_systems = []
 
-    DB_LOCK.acquire()
-    try:
+    with get_cursor() as cursor:
         cursor.execute("SELECT * FROM System")
         for row in cursor:
             raw_systems.append(row)
@@ -453,8 +442,7 @@ def get_systems_from_access():
             }
             sys_dicts_by_name[raw_sys[0]] = complete_system
 
-    finally:
-        DB_LOCK.release()
+
 
     all_waypoints = get_waypoints_from_access()
 
@@ -483,8 +471,7 @@ def get_systems_from_access():
 def access_get_detailed_systems():
     raw_systems = []
 
-    DB_LOCK.acquire()
-    try:
+    with get_cursor() as cursor:
         cursor.execute("SELECT * FROM System")
         for row in cursor:
             raw_systems.append(row)
@@ -502,9 +489,6 @@ def access_get_detailed_systems():
                 "factions": []
             }
             sys_dicts_by_name[raw_sys[0]] = complete_system
-
-    finally:
-        DB_LOCK.release()
 
     all_waypoints = get_waypoints_from_access()
 
@@ -527,8 +511,7 @@ def access_get_detailed_systems():
 def get_shipyards_from_access():
     shipyards = {}
 
-    DB_LOCK.acquire()
-    try:
+    with get_cursor() as cursor:
         cursor.execute("SELECT * FROM Shipyards")
         for shipyard_entry in cursor:
             waypoint_symbol = shipyard_entry[1]
@@ -552,8 +535,7 @@ def get_shipyards_from_access():
                     "timeStamp": shipyard_entry[6]
                 }
                 shipyards[waypoint_symbol]["ships"].append(ship)
-    finally:
-        DB_LOCK.release()
+
     shipyards_list = []
     for s in shipyards.values():
         shipyards_list.append(s)
@@ -563,7 +545,6 @@ def get_shipyards_from_access():
 def get_waypoints_from_access(system=None):
     waypoints = []
 
-    DB_LOCK.acquire()
     params = ()
 
     cmd = "SELECT * FROM (Waypoint LEFT JOIN Charts ON (Waypoint.symbol = Charts.WaypointSymbol))"
@@ -571,7 +552,7 @@ def get_waypoints_from_access(system=None):
         cmd += 'WHERE ((Waypoint.systemSymbol)=?)'
         params = (system,)
 
-    try:
+    with get_cursor() as cursor:
         cursor.execute(cmd, params)
 
         for raw_wp in cursor:
@@ -605,27 +586,26 @@ def get_waypoints_from_access(system=None):
                     dict_wp["chart"] = chart
 
                 waypoints.append(dict_wp)
-    finally:
-        DB_LOCK.release()
+
     return waypoints
 
 
 def get_ship_roles_from_access():
     ship_roles = []
-    DB_LOCK.acquire()
-    cursor.execute('SELECT * FROM ShipAssignments')
 
-    for c in cursor:
-        ship_role = {}
-        ship_role['shipName'] = c[0]
-        ship_role['hasAssignment'] = c[1]
-        ship_role['assignmentType'] = c[2]
-        ship_role['systemSymbol'] = c[3]
-        ship_role['waypointSymbol'] = c[4]
-        if UNAME + "-" in ship_role['shipName']:
-            ship_roles.append(ship_role)
+    with get_cursor() as cursor:
+        cursor.execute('SELECT * FROM ShipAssignments')
 
-    DB_LOCK.release()
+        for c in cursor:
+            ship_role = {}
+            ship_role['shipName'] = c[0]
+            ship_role['hasAssignment'] = c[1]
+            ship_role['assignmentType'] = c[2]
+            ship_role['systemSymbol'] = c[3]
+            ship_role['waypointSymbol'] = c[4]
+            if UNAME + "-" in ship_role['shipName']:
+                ship_roles.append(ship_role)
+
     return ship_roles
 
 
@@ -638,10 +618,7 @@ def get_markets_from_access(system=None):
         params = (system, )
         cmd = "SELECT Markets.* FROM Waypoint INNER JOIN Markets ON Waypoint.symbol = Markets.Waypoint WHERE (((Waypoint.systemSymbol)=?));"
 
-
-    DB_LOCK.acquire()
-
-    try:
+    with get_cursor() as cursor:
         cursor.execute(cmd, params)
         for marketplace_entry in cursor:
             waypoint_symbol = marketplace_entry[1]
@@ -668,8 +645,6 @@ def get_markets_from_access(system=None):
                     trade_good["timeStamp"] = marketplace_entry[7]
                     trade_good["type"] = marketplace_entry[8]
                 marketplaces[waypoint_symbol]["tradeGoods"].append(trade_good)
-    finally:
-        DB_LOCK.release()
 
     markets_list = []
     for marketplace in marketplaces.values():
@@ -710,11 +685,9 @@ def access_insert_entry(table_name, column_name_list, value_list):
             cmd += "'" + str(value) + "'"
         i += 1
     cmd += ");"
-    DB_LOCK.acquire()
-    try:
+    with get_cursor() as cursor:
         cursor.execute(cmd)
-    finally:
-        DB_LOCK.release()
+
 
 
 def access_update_entry(table_name, update_column_name_list, update_value_list, where_column_name_list, where_value_list):
@@ -726,22 +699,19 @@ def access_update_entry(table_name, update_column_name_list, update_value_list, 
         cmd += " AND ((" + table_name + "." + where_column_name_list[i] + ')=?)'
     cmd += ");"
     params = tuple(update_value_list + where_value_list)
-    DB_LOCK.acquire()
-    try:
+
+    with get_cursor() as cursor:
         cursor.execute(cmd, params)
-    finally:
-        DB_LOCK.release()
+
 
 
 
 
 def access_get_market(waypoint):
     cmd = "SELECT * FROM Markets WHERE Waypoint=?"
-    while not DB_LOCK.acquire(timeout=10):
-        time.sleep(1)
-    try:
-        cursor.execute(cmd, (waypoint,))
 
+    with get_cursor() as cursor:
+        cursor.execute(cmd, (waypoint,))
 
         market_vals = []
         for m in cursor:
@@ -756,8 +726,7 @@ def access_get_market(waypoint):
                 "type": m[8]
             }
             market_vals.append(good_dict)
-    finally:
-        DB_LOCK.release()
+
     return market_vals
 
 
@@ -776,14 +745,14 @@ def access_record_jump_gate(jump_gate_dict):
 
 def access_get_jump_gate(waypoint):
     cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=?"
-    DB_LOCK.acquire()
+
     jump_gate = {"symbol": waypoint, "connections": []}
-    try:
+
+    with get_cursor() as cursor:
         cursor.execute(cmd, (waypoint,))
         for connection in cursor:
             jump_gate["connections"].append(connection[2])
-    finally:
-        DB_LOCK.release()
+
 
     if len(jump_gate["connections"]) > 0:
         return jump_gate
@@ -793,17 +762,17 @@ def access_get_jump_gate(waypoint):
 
 def access_get_all_jump_gates():
     cmd = "SELECT * FROM JumpGates"
-    DB_LOCK.acquire()
+
     jump_gates = {}
-    try:
+
+    with get_cursor() as cursor:
         cursor.execute(cmd)
         for connection in cursor:
             if connection[0] not in jump_gates.keys():
                 jump_gates[connection[0]] = {"symbol": connection[0], "connections": [connection[2]]}
             else:
                 jump_gates[connection[0]]["connections"].append(connection[2])
-    finally:
-        DB_LOCK.release()
+
 
     jump_gate_list = []
     for j in jump_gates.values():
@@ -815,11 +784,12 @@ def access_get_all_jump_gates():
 def access_get_available_jumps():
     cmd = "SELECT * FROM JumpsAvailable"
     jumps = []
-    DB_LOCK.acquire()
-    cursor.execute(cmd)
-    for row in cursor:
-        jumps.append(row)
-    DB_LOCK.release()
+
+    with get_cursor() as cursor:
+        cursor.execute(cmd)
+        for row in cursor:
+            jumps.append(row)
+
     return jumps
 
 
@@ -847,41 +817,37 @@ def access_record_shipyard(shipyard_dict):
 
 def jump_connection_exists(origin, destination):
     def __jump_connection_exists(origin, destination):
-        DB_LOCK.acquire()
 
-        # origin waypoint, destination waypoint
-        cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedWaypointSymbol=?"
-        cursor.execute(cmd, (origin, destination))
-        row = cursor.fetchone()
-        if row:
-            DB_LOCK.release()
-            return row
+        with get_cursor() as cursor:
 
-        # origin system, destination system
-        cmd = "SELECT * FROM JumpGates WHERE originSystemSymbol=? AND connectedSystemSymbol=?"
-        cursor.execute(cmd, (origin, destination))
-        row = cursor.fetchone()
-        if row:
-            DB_LOCK.release()
-            return row
+            # origin waypoint, destination waypoint
+            cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedWaypointSymbol=?"
+            cursor.execute(cmd, (origin, destination))
+            row = cursor.fetchone()
+            if row:
+                return row
 
-        # origin waypoint, destination system
-        cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedSystemSymbol=?"
-        cursor.execute(cmd, (origin, destination))
-        row = cursor.fetchone()
-        if row:
-            DB_LOCK.release()
-            return row
+            # origin system, destination system
+            cmd = "SELECT * FROM JumpGates WHERE originSystemSymbol=? AND connectedSystemSymbol=?"
+            cursor.execute(cmd, (origin, destination))
+            row = cursor.fetchone()
+            if row:
+                return row
 
-        # origin system, destination waypoint
-        cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedWaypointSymbol=?"
-        cursor.execute(cmd, (origin, destination))
-        row = cursor.fetchone()
-        if row:
-            DB_LOCK.release()
-            return row
+            # origin waypoint, destination system
+            cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedSystemSymbol=?"
+            cursor.execute(cmd, (origin, destination))
+            row = cursor.fetchone()
+            if row:
+                return row
 
-        DB_LOCK.release()
+            # origin system, destination waypoint
+            cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=? AND connectedWaypointSymbol=?"
+            cursor.execute(cmd, (origin, destination))
+            row = cursor.fetchone()
+            if row:
+                return row
+
         return False
 
     row = __jump_connection_exists(origin, destination)
@@ -896,8 +862,8 @@ def jump_connection_exists(origin, destination):
 
 def access_get_shipyard(waypoint):
     cmd = "SELECT * FROM Shipyards WHERE Waypoint=?"
-    DB_LOCK.acquire()
-    try:
+
+    with get_cursor() as cursor:
         cursor.execute(cmd, (waypoint,))
 
         shipyard_dict = {"symbol": waypoint,
@@ -920,8 +886,7 @@ def access_get_shipyard(waypoint):
 
         if len(ships) > 0:
             shipyard_dict["ships"] = ships
-    finally:
-        DB_LOCK.release()
+
     return shipyard_dict
 
 
