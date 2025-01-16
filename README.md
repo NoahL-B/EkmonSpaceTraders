@@ -1,5 +1,9 @@
 # EkmonSpaceTraders
 
+## About:
+
+This is a client for the SpaceTraders API game. Documentation for the game can be found at https://spacetraders.io/ 
+
 ## Before you begin:
 
 Use requirements.txt to ensure you have all the packages you need.
@@ -12,10 +16,10 @@ Make a copy of SpaceTradersDatabase-SAMPLE.accdb and rename it to SpaceTradersDa
 ## Usage:
 
 This repository stores information in a Microsoft Access database. I'm not including it in the git distribution because 
-it stores my tokens and weekly data. You can provide add an existing token (or tokens) to the ID table. You can create new agents by running Reset_Procedure.py, making sure to modify it first to reflect your desired username and faction.
+it stores my tokens and weekly data. You can provide an existing token (or tokens) to the ID table. You can create new agents by running Reset_Procedure.py, making sure to modify it first to reflect your desired username and faction.
 
 After each reset, old data is saved to the old_data folder. Make this folder before you run Reset_Procedure.py.
-Also set your username and faction on lines 11 and 12 of Reset_Procedure.py.
+Also set your username and email on lines 4 and 5 of __SECRETS.py.
 
 After creating or adding your agent info, run Startup_Procedure.py to add information about every system and waypoint to the database. The startup procedure will also start making profitable trades with your command ship!
 

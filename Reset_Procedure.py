@@ -2,10 +2,11 @@ import datetime as dt
 import os
 import shutil
 
-from __SHARED import cursor
+from __SHARED import get_cursor
 from __SECRETS import UNAME, EMAIL
 import api_requests.raw_api_requests as rar
 
+cursor = get_cursor()
 
 UTC_NOW = dt.datetime.now(dt.timezone.utc)
 TARGET_UNAME = UNAME
@@ -41,7 +42,7 @@ def copy_old_data():
 
 
 def clear_db():
-    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts", "ShipAssignments", "JumpGates", "Shipyards"]:
+    for table_name in ["ID", "System", "Waypoint", "Markets", "Charts", "ShipAssignments", "JumpGates", "Shipyards", "Transactions"]:
         cmd = "DELETE FROM {};".format(table_name) # noqa
         cursor.execute(cmd)
 

@@ -1,6 +1,9 @@
 import datetime
 import math
+import random
 import time
+
+import pyodbc
 
 from database import Waypoint
 from database.System import *
@@ -312,6 +315,20 @@ def get_unknown_systems(all_systems):
     return unknown_systems
 
 
+def too_many_tables_handler(func):
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except pyodbc.OperationalError as e:
+            time.sleep(random.randint(1, 100))
+            result = func(*args, **kwargs)
+            return result
+    return wrapper
+
+
+
+
 def populate_markets():
     all_waypoints = get_waypoints_from_access()
     for wp in all_waypoints:
@@ -360,6 +377,7 @@ def populate_waypoints(all_systems):
         # print("\r", counter, wp["symbol"], end="")
 
 
+@too_many_tables_handler
 def populate_waypoint(wp_object, access_waypoint_symbols=None):
     if access_waypoint_symbols is None:
         access_waypoints = get_waypoints_from_access()
@@ -379,6 +397,7 @@ def populate_waypoint(wp_object, access_waypoint_symbols=None):
         record_chart(wp_object)
 
 
+@too_many_tables_handler
 def populate_systems(all_systems):
     access_systems = get_systems_from_access()
     access_system_symbols = []
@@ -392,7 +411,7 @@ def populate_systems(all_systems):
                 cursor.execute(cmd)
 
 
-
+@too_many_tables_handler
 def record_chart(wp):
     chart = wp.chart
     symbol = wp.symbol
@@ -420,6 +439,7 @@ def record_chart(wp):
         access_update_entry("Charts", ["submittedOn"], [submission_time], ["waypointSymbol"], [symbol])
 
 
+@too_many_tables_handler
 def get_systems_from_access():
     raw_systems = []
 
@@ -468,6 +488,7 @@ def get_systems_from_access():
     return sys_list
 
 
+@too_many_tables_handler
 def access_get_detailed_systems():
     raw_systems = []
 
@@ -508,6 +529,7 @@ def access_get_detailed_systems():
     return sys_list
 
 
+@too_many_tables_handler
 def get_shipyards_from_access():
     shipyards = {}
 
@@ -542,6 +564,7 @@ def get_shipyards_from_access():
     return shipyards_list
 
 
+@too_many_tables_handler
 def get_waypoints_from_access(system=None):
     waypoints = []
 
@@ -590,6 +613,7 @@ def get_waypoints_from_access(system=None):
     return waypoints
 
 
+@too_many_tables_handler
 def get_ship_roles_from_access():
     ship_roles = []
 
@@ -609,6 +633,7 @@ def get_ship_roles_from_access():
     return ship_roles
 
 
+@too_many_tables_handler
 def get_markets_from_access(system=None):
     marketplaces = {}
 
@@ -669,6 +694,7 @@ def access_update_ship_assignment(shipName, hasAssignment=None, assignmentType=N
         access_update_entry('ShipAssignments', ["assignmentWaypoint"], [assignmentWaypoint], ["shipName"], [shipName])
 
 
+@too_many_tables_handler
 def access_insert_entry(table_name, column_name_list, value_list):
     cmd = "INSERT INTO " + table_name + " (" + column_name_list[0]
     for col_name in column_name_list[1:]:
@@ -676,20 +702,16 @@ def access_insert_entry(table_name, column_name_list, value_list):
     cmd += ") VALUES ("
     i = 0
     while i < len(value_list):
-        value = value_list[i]
         if i > 0:
-            cmd += ", "
-        if type(value) is bool:
-            cmd += str(value)
-        else:
-            cmd += "'" + str(value) + "'"
+            cmd += "?, "
         i += 1
-    cmd += ");"
+    cmd += "?)"
+
     with get_cursor() as cursor:
-        cursor.execute(cmd)
+        cursor.execute(cmd, value_list)
 
 
-
+@too_many_tables_handler
 def access_update_entry(table_name, update_column_name_list, update_value_list, where_column_name_list, where_value_list):
     cmd = "UPDATE " + table_name + " SET " + table_name + "." + update_column_name_list[0] + ' = ?'
     for i in range(1, len(update_column_name_list)):
@@ -704,9 +726,7 @@ def access_update_entry(table_name, update_column_name_list, update_value_list, 
         cursor.execute(cmd, params)
 
 
-
-
-
+@too_many_tables_handler
 def access_get_market(waypoint):
     cmd = "SELECT * FROM Markets WHERE Waypoint=?"
 
@@ -742,7 +762,7 @@ def access_record_jump_gate(jump_gate_dict):
             access_insert_entry("JumpGates", ["originWaypointSymbol", "originSystemSymbol", "connectedWaypointSymbol", "connectedSystemSymbol"], [origin_waypoint, origin_system, connection_waypoint, connection_system])
 
 
-
+@too_many_tables_handler
 def access_get_jump_gate(waypoint):
     cmd = "SELECT * FROM JumpGates WHERE originWaypointSymbol=?"
 
@@ -760,6 +780,7 @@ def access_get_jump_gate(waypoint):
         return None
 
 
+@too_many_tables_handler
 def access_get_all_jump_gates():
     cmd = "SELECT * FROM JumpGates"
 
@@ -781,6 +802,7 @@ def access_get_all_jump_gates():
     return jump_gate_list
 
 
+@too_many_tables_handler
 def access_get_available_jumps():
     cmd = "SELECT * FROM JumpsAvailable"
     jumps = []
@@ -791,6 +813,29 @@ def access_get_available_jumps():
             jumps.append(row)
 
     return jumps
+
+
+@too_many_tables_handler
+def access_get_transactions(ship=None, system=None):
+    if ship is not None:
+        cmd = "SELECT * FROM Transactions WHERE Transactions.Ship=?"
+        args = (ship,)
+    elif system is not None:
+        cmd = "SELECT * FROM Transactions WHERE Transactions.System=?"
+        args = (system,)
+    else:
+        cmd = "SELECT * FROM Transactions"
+        args = ()
+
+    transaction_list = []
+    with get_cursor() as cursor:
+        cursor.execute(cmd, args)
+        for row in cursor:
+            transaction = {"ID": row[0], "Ship": row[1], "Waypoint": row[2], "System": row[3], "Credits": row[4],
+                           "ShipPurchase": row[5], "Refuel": row[6], "Repair": row[7], "Transfer": row[8],
+                           "toShip": row[9], "TradeGood": row[10], "Quantity": row[11], "transactionTime": row[12]}
+            transaction_list.append(transaction)
+    return transaction_list
 
 
 def access_record_shipyard(shipyard_dict):
@@ -815,6 +860,7 @@ def access_record_shipyard(shipyard_dict):
             access_update_entry("Shipyards", ["shipName", "supply", "activity", "purchasePrice", "timestamp"], [ship["name"], ship["supply"], ship["activity"], ship["purchasePrice"], current_time], ["Waypoint", "type"], [waypoint, ship["type"]])
 
 
+@too_many_tables_handler
 def jump_connection_exists(origin, destination):
     def __jump_connection_exists(origin, destination):
 
@@ -860,6 +906,7 @@ def jump_connection_exists(origin, destination):
     return False
 
 
+@too_many_tables_handler
 def access_get_shipyard(waypoint):
     cmd = "SELECT * FROM Shipyards WHERE Waypoint=?"
 
@@ -929,8 +976,48 @@ def access_record_low_info_market(market_dict):
             access_insert_entry("Markets", ["Waypoint", "Symbol"], [waypoint, trade_good["symbol"]])
 
 
-def access_replenishing_trades(System):
+@too_many_tables_handler
+def access_replenishing_trades(system):
     cmd = "EXEC ReplenishingTrades @System = ?"
+    possible_trades = []
+    with get_cursor() as cursor:
+        cursor.execute(cmd, system)
+
+        for row in cursor:
+            possible_trade = {
+                "tradeSymbol": row[1],
+                "originWaypoint": row[2],
+                "originSupply": row[3],
+                "originPrice": row[5],
+                "destinationWaypoint": row[6],
+                "destinationSupply": row[7],
+                "destinationPrice": row[9],
+                "profit": row[10]
+            }
+            possible_trades.append(possible_trade)
+    return possible_trades
+
+
+@too_many_tables_handler
+def access_profitable_trades(system):
+    cmd = "EXEC ProfitableTrades @System = ?"
+    possible_trades = []
+    with get_cursor() as cursor:
+        cursor.execute(cmd, system)
+
+        for row in cursor:
+            possible_trade = {
+                "tradeSymbol": row[1],
+                "originWaypoint": row[2],
+                "originSupply": row[3],
+                "originPrice": row[5],
+                "destinationWaypoint": row[6],
+                "destinationSupply": row[7],
+                "destinationPrice": row[9],
+                "profit": row[10]
+            }
+            possible_trades.append(possible_trade)
+    return possible_trades
 
 
 

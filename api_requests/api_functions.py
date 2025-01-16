@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 
 import api_requests.raw_api_requests as raw_api_requests
-from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, refuel_ship,  transfer_cargo, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, scrap_ship, get_repair_ship, repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
-from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate
+from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, get_repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
+from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate, access_insert_entry
 
 
 def waypoint_name_to_system_name(waypoint_name: str):
@@ -45,11 +45,41 @@ def get_credits(token: str):
     return c
 
 
+def refuel_ship(token: str, shipSymbol: str, units: int = 0, fromCargo: bool = False,  priority: str = "NORMAL"):
+    if fromCargo and units == 0:
+        raise ValueError("Units must be specified when refueling from cargo")
+
+    result = raw_api_requests.refuel_ship(token, shipSymbol, units, fromCargo, priority)
+
+    if "data" in result.keys():
+        waypoint = result["data"]["transaction"]["waypointSymbol"]
+        system = waypoint_name_to_system_name(waypoint)
+        credits = result["data"]["transaction"]["totalPrice"] * -1
+        timeStamp = datetime.now(timezone.utc)
+
+        if fromCargo:
+            trade_units = units // 100 + (units % 100 > 0)
+            trade_units *= -1
+            access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Refuel", "TradeGood", "Quantity", "transactionTime"],
+                                [shipSymbol, waypoint, system, True, "FUEL", trade_units, timeStamp])
+        else:
+            access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "Refuel", "transactionTime"],
+                                [shipSymbol, waypoint, system, credits, True, timeStamp])
+    return result
+
+
+
+
 def purchase_cargo(token: str, shipSymbol: str, symbol: str, units: int, priority: str = "NORMAL"):
     result = raw_api_requests.purchase_cargo(token, shipSymbol, symbol, units, priority)
     if 'data' in result.keys():
         waypoint = result['data']['transaction']['waypointSymbol']
         system = waypoint_name_to_system_name(waypoint)
+        credits = result["data"]["transaction"]["totalPrice"] * -1
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "TradeGood", "Quantity", "transactionTime"],
+                            [shipSymbol, waypoint, system, credits, symbol, units, timeStamp])
+
         get_market(token, system, waypoint)
     return result
 
@@ -59,7 +89,20 @@ def sell_cargo(token: str, shipSymbol: str, symbol: str, units: int, priority: s
     if 'data' in result.keys():
         waypoint = result['data']['transaction']['waypointSymbol']
         system = waypoint_name_to_system_name(waypoint)
+        credits = result["data"]["transaction"]["totalPrice"]
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "TradeGood", "Quantity", "transactionTime"],
+                            [shipSymbol, waypoint, system, credits, symbol, units * -1, timeStamp])
         get_market(token, system, waypoint)
+    return result
+
+
+def transfer_cargo(token: str, fromShipSymbol: str, toShipSymbol: str, tradeSymbol: str, units: int, priority: str = "NORMAL"):
+    result = raw_api_requests.transfer_cargo(token, fromShipSymbol, toShipSymbol, tradeSymbol, units, priority)
+    if "data" in result.keys():
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "TradeGood", "Quantity", "Transfer", "ToShip", "transactionTime"],
+                            [fromShipSymbol, tradeSymbol, units, True, toShipSymbol, timeStamp])
     return result
 
 
@@ -78,9 +121,18 @@ def get_all_ships(token: str):
 
 def extract(token: str, shipSymbol: str, survey: dict = None):
     if survey:
-        return extract_resources_with_survey(token, shipSymbol, survey)
+        extraction = extract_resources_with_survey(token, shipSymbol, survey)
     else:
-        return extract_resources(token, shipSymbol)
+        extraction = extract_resources(token, shipSymbol)
+
+    if "data" in extraction.keys():
+        symbol = extraction["data"]["extraction"]["yield"]["symbol"]
+        units = extraction["data"]["extraction"]["yield"]["units"]
+        timeStamp = datetime.now(timezone.utc)
+        if units > 0:
+            access_insert_entry("Transactions", ["Ship", "TradeGood", "Quantity", "transactionTime"],
+                                [shipSymbol, symbol, units, timeStamp])
+    return extraction
 
 
 def nav_to_time_delay(nav):
@@ -133,7 +185,10 @@ def navigate(token, ship, location, nav_and_sleep=False):
                 return to_return
 
     if nav_and_sleep:
-        time.sleep(nav_to_time_delay(to_return))
+        try:
+            time.sleep(nav_to_time_delay(to_return))
+        except ValueError:
+            pass
     return to_return
 
 
@@ -168,9 +223,42 @@ def buyShip(token: str, shipyard: str, shipType: str):
         orbit_ship(token, shipName)
         patch_ship_nav(token, shipName, "BURN")
         print("Purchased new ship:", shipName)
+
+        waypoint = purchasedShip["data"]["ship"]["nav"]["waypointSymbol"]
+        system = purchasedShip["data"]["ship"]["nav"]["systemSymbol"]
+        credits = purchasedShip["data"]["transaction"]["price"] * -1
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "ShipPurchase", "transactionTime"],
+                            [shipName, waypoint, system, credits, True, timeStamp])
         return shipName
     else:
         return purchasedShip
+
+
+def scrap_ship(token: str, shipSymbol: str, priority="NORMAL"):
+    sold_ship = raw_api_requests.scrap_ship(token, shipSymbol, priority)
+    if "data" in sold_ship.keys():
+        waypoint = sold_ship["data"]["transaction"]["waypointSymbol"]
+        system = waypoint_name_to_system_name(waypoint)
+        credits = sold_ship["data"]["transaction"]["totalPrice"]
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "ShipPurchase", "transactionTime"],
+                            [shipSymbol, waypoint, system, credits, True, timeStamp])
+
+    return sold_ship
+
+
+def repair_ship(token: str, shipSymbol: str, priority="NORMAL"):
+    ship_repair = raw_api_requests.repair_ship(token, shipSymbol, priority)
+    if "data" in ship_repair.keys():
+        waypoint = ship_repair["data"]["transaction"]["waypointSymbol"]
+        system = waypoint_name_to_system_name(waypoint)
+        credits = ship_repair["data"]["transaction"]["totalPrice"] * -1
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "ShipPurchase", "transactionTime"],
+                            [shipSymbol, waypoint, system, credits, True, timeStamp])
+    return ship_repair
+
 
 
 def get_market(token, systemSymbol, waypointSymbol, priority="NORMAL"):
@@ -210,6 +298,10 @@ def buyProbe(token, shipyard):
 
 def buySiphonDrone(token, shipyard):
     return buyShip(token, shipyard, "SHIP_SIPHON_DRONE")
+
+
+def queue_len():
+    return raw_api_requests.RH.queue_len()
 
 
 if __name__ == '__main__':

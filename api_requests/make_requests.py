@@ -11,6 +11,7 @@ def rate_limit_retry(func, max_tries=10):
         tries = 1
         while result.status_code == 429 and tries < max_tries:
             tries += 1
+            print("RATE LIMITED")
             result_dict = result.json()
             sleep_time = result_dict["error"]["data"]["retryAfter"]
             time.sleep(sleep_time)
@@ -24,6 +25,7 @@ def server_error_retry(func, max_tries=3):
         result = func(*args, **kwargs)
         tries = 1
         while 500 <= result.status_code <= 599 and tries < max_tries:
+            print("SERVER FAILURE")
             tries += 1
             time.sleep(2 ** tries / 2)
             result = func(*args, **kwargs)
@@ -43,7 +45,7 @@ def print_builder(*args, min_spaces=2, spaces=7):
 
 
 class RequestHandler:
-    def __init__(self, rate_limit: int = 2, burst_limit: int = 10, printouts=False):
+    def __init__(self, rate_limit: int = 2, burst_limit: int = 30, printouts=False):
         self.rate_limit = rate_limit
         self.burst_limit = burst_limit
         self.recent_request_times = []
@@ -75,7 +77,7 @@ class RequestHandler:
             self.queue_lock.release()
 
             if self.printouts:
-                printout = print_builder(self.queue_len(), self.request_count, str(self.get_rpm())[:5], *args[:4])
+                printout = print_builder(self.queue_len(), self.request_count, self.successful_request_count, str(self.get_rpm())[:5], *args[:4])
                 with self.print_lock:
                     print(printout)
 
@@ -118,15 +120,15 @@ class RequestHandler:
     def __clear_old_requests(self):
         now = datetime.datetime.utcnow()
         rate_delta = datetime.timedelta(seconds=1)
-        burst_delta = datetime.timedelta(seconds=10)
+        burst_delta = datetime.timedelta(seconds=60)
         if self.recent_request_times:
             old = self.recent_request_times[0]
             if (now - old) > rate_delta:
                 self.recent_request_times = []
-            if self.recent_burst_times:
-                old = self.recent_burst_times[0]
-                if (now - old) > burst_delta:
-                    self.recent_burst_times = []
+        if self.recent_burst_times:
+            old = self.recent_burst_times[0]
+            if (now - old) > burst_delta:
+                self.recent_burst_times = []
 
     def start_pacing(self):
         self.pacing_rc = 0
@@ -170,7 +172,7 @@ class RequestHandler:
 
         now = datetime.datetime.utcnow()
         rate_delta = datetime.timedelta(seconds=1)
-        burst_delta = datetime.timedelta(seconds=10)
+        burst_delta = datetime.timedelta(seconds=60)
         rate_next_clear_time = self.recent_request_times[0] + rate_delta
         burst_next_clear_time = self.recent_burst_times[0] + burst_delta
         timedelta_to_rate_clear = rate_next_clear_time - now # noqa
@@ -230,8 +232,17 @@ class RequestHandler:
             result = requests.request(request_type, url, headers=full_headers, data=params_json)
         self.__record_request_time()
 
+        if result.status_code == 429:
+            while len(self.recent_request_times) < self.rate_limit or len(self.recent_burst_times) < self.burst_limit:
+                self.__record_request_time()
+
         return result
 
+    def get_success_rate(self, pacing_only=False):
+        if pacing_only:
+            return self.pacing_src / self.pacing_rc
+        else:
+            return self.successful_request_count / self.request_count
 
 def main():
     rh = RequestHandler()
