@@ -6,6 +6,10 @@ from api_requests.raw_api_requests import get_status, register_new_agent, get_ag
 from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate, access_insert_entry
 
 
+def reset_pacing():
+    raw_api_requests.RH.start_pacing()
+
+
 def waypoint_name_to_system_name(waypoint_name: str):
     name_list = waypoint_name.split("-")
     system_name = name_list[0] + "-" + name_list[1]

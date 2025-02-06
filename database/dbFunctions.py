@@ -341,8 +341,13 @@ def populate_jump_gates():
     all_waypoints = get_waypoints_from_access()
     for wp in all_waypoints:
         if wp["type"] == "JUMP_GATE":
-            if access_get_jump_gate(wp["systemSymbol"]) is None:
-                api.get_jump_gate(TOKEN, wp["systemSymbol"], wp["symbol"])
+            uncharted = False
+            for trait in wp["traits"]:
+                if trait["symbol"] == "UNCHARTED":
+                    uncharted = True
+            if not uncharted:
+                if access_get_jump_gate(wp["systemSymbol"]) is None:
+                    api.get_jump_gate(TOKEN, wp["systemSymbol"], wp["symbol"])
 
 
 def populate_shipyards():

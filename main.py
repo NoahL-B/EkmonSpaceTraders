@@ -587,13 +587,18 @@ def minerLoop(ship, lock=None, surveys=None):
             extraction = extract(ship, survey)
             if "data" not in extraction.keys():
                 print(ship + ": " + str(extraction))
-            elif extraction['data']['extraction']['yield']['units'] >= 0:
+            elif extraction['data']['extraction']['yield']['units'] > 0:
                 # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
-                pass
+                if extraction['data']['extraction']['yield']['symbol'] in ["ICE_WATER"]:
+                    api_functions.jettison_cargo(TOKEN, ship, extraction['data']['extraction']['yield']['symbol'],
+                                                 extraction['data']['extraction']['yield']['units'],
+                                                 "HIGH")  # only high priority because we don't want the mining haulers to see the item in inventory and attempt to collect it.
 
-            if "error" in extraction.keys() and extraction["error"]["code"] == 4221:
+            if "error" in extraction.keys() and extraction["error"]["code"] == 4221:  # survey expired
                 # print("Survey expired and extraction failed")
                 pass
+            elif "error" in extraction.keys() and extraction["error"]["code"] == 4253:  # asteroid unstable
+                time.sleep(random.randint(3400, 3600))
             else:
                 cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
                 time.sleep(cooldown)
@@ -877,7 +882,7 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
     hauler_count = 0
     nurse_count = 0
     for s in ship_roles:
-        if s['hasAssignment']  and s['systemSymbol'] == destination_system:
+        if s['hasAssignment'] and s['systemSymbol'] == destination_system:
             if s['assignmentType'] == "TRADE_HAULER":
                 hauler_count += 1
             elif s['assignmentType'] == "MARKET_NURSE":
@@ -968,6 +973,9 @@ def commandPhaseA(ship):
             x = threading.Thread(target=auto_nav, args=(new_ship_name, GAS_GIANT), daemon=True)
             x.start()
             print("THREAD REQUIRES PROGRAM RESTART TO FUNCTION")
+        elif assignmentType == "COMMAND_PHASE_B":
+            new_ship_name = api_functions.buyLightHauler(TOKEN, shipyard)
+            dbFunctions.access_add_ship_assignment(new_ship_name, True, assignmentType, SYSTEM)
 
     for s in ship_assignments:
         if s['assignmentType'] in ships_desired.keys():
@@ -988,7 +996,8 @@ def commandPhaseA(ship):
         "TRADE_HAULER": 4,
         "SIPHON_SHIP": 2,
         "GAS_GIANT_HAULER": 2,
-        "SURVEYOR": 3
+        "SURVEYOR": 3,
+        "COMMAND_PHASE_B": 1
     }
     for s in ship_assignments:
         if s['assignmentType'] in ships_desired.keys():
@@ -1002,7 +1011,7 @@ def commandPhaseA(ship):
             start_ship(assignment_type)
             num -= 1
 
-    dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_B")
+    dbFunctions.access_update_ship_assignment(ship, assignmentType="MARKET_NURSE")
 
 
 def find_construction(system):
@@ -1069,6 +1078,13 @@ def commandPhaseB(ship, system=None):
 
         construction_requirements = get_construction_materials(system)
         material_sum = sum(construction_requirements.values())
+
+    dbFunctions.access_update_entry("Waypoint", ["isUnderConstruction"], [False], ["symbol"], [construction_site])
+
+    all_systems = dbFunctions.get_systems_from_access()
+    this_system = dbFunctions.get_system(SYSTEM, all_systems)
+    dbFunctions.populate_waypoints([this_system])
+    dbFunctions.populate_jump_gates()
 
     agent = api_functions.get_agent(TOKEN)
     faction_name = agent['data']['startingFaction']
@@ -1405,6 +1421,8 @@ def market_scout_master(ship, system):
 
         shipyard = None
 
+        agent_credits = 0
+
         for waypoint, value in stationary_scout_dict.items():
             ship_name, market = value
             if ship_name is None:
@@ -1413,7 +1431,10 @@ def market_scout_master(ship, system):
                     if shipyard is not None:
                         auto_nav(ship, shipyard)
                         dock(ship)
-                if shipyard is not None:
+                if agent_credits == 0:
+                    agent_credits = api_functions.get_agent(TOKEN)
+
+                if shipyard is not None and agent_credits > 800000:
                     ship_name = api_functions.buyProbe(TOKEN, shipyard)
                     if type(ship_name) == str:
                         stationary_scout_dict[waypoint] = ship_name
@@ -1464,7 +1485,7 @@ def main():
     mining_collection_lock = threading.Lock()
     siphon_collection_lock = threading.Lock()
     survey_lock = threading.Lock()
-    surveys = []
+    surveys = {}
     max_num_surveys = 20
 
     ship_roles = dbFunctions.get_ship_roles_from_access()
@@ -1479,6 +1500,7 @@ def main():
             if ship_role['waypointSymbol'] not in mining_ships.keys():
                 mining_ships[ship_role['waypointSymbol']] = []
                 siphon_ships[ship_role['waypointSymbol']] = []
+                surveys[ship_role['waypointSymbol']] = []
             if ship_role['assignmentType'] == "MINING_SHIP":
                 mining_ships[ship_role['waypointSymbol']].append(ship_role['shipName'])
             elif ship_role['assignmentType'] == "SIPHON_SHIP":
@@ -1488,11 +1510,11 @@ def main():
         if ship_role['hasAssignment']:
 
             if ship_role['assignmentType'] == "MINING_SHIP":
-                t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], survey_lock, surveys), daemon=True)
+                t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], survey_lock, surveys[ship_role['waypointSymbol']]), daemon=True)
             elif ship_role['assignmentType'] == "SIPHON_SHIP":
                 t = threading.Thread(target=siphonLoop, args=(ship_role['shipName'],), daemon=True)
             elif ship_role['assignmentType'] == "SURVEYOR":
-                t = threading.Thread(target=survey_loop, args=(ship_role['shipName'], survey_lock, surveys, max_num_surveys), daemon=True)
+                t = threading.Thread(target=survey_loop, args=(ship_role['shipName'], survey_lock, surveys[ship_role['waypointSymbol']], max_num_surveys), daemon=True)
             elif ship_role['assignmentType'] == "TRADE_HAULER":
                 if ship_role["systemSymbol"] == SYSTEM:
                     construction_materials = get_construction_materials(SYSTEM).keys()
@@ -1571,6 +1593,25 @@ def main():
                         i += 1
     return threads
 
+
+
+def start_main_when_tables_are_filled():
+
+    tables_filled = False
+    last_len = 0
+
+    while not tables_filled:
+        ajgs = dbFunctions.access_get_all_jump_gates()
+        this_len = len(ajgs)
+        if this_len > 0:
+            if this_len == last_len:
+                tables_filled = True
+            else:
+                last_len = this_len
+        time.sleep(60)
+
+    api_functions.reset_pacing()
+    return main()
 
 
 init_globals()
