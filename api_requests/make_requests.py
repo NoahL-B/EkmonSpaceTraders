@@ -220,7 +220,7 @@ class RequestHandler:
         for header in headers.keys():
             full_headers[header] = headers[header]
 
-        url = 'https://api.spacetraders.io/v2/' + endpoint
+        url = 'https://api.st-meta.net/v2' + endpoint
         params_json = json.dumps(params)
 
         self.__wait_to_request()
