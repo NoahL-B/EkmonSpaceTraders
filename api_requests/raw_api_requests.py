@@ -12,14 +12,14 @@ def get_status(token: str | None, priority: str = "NORMAL"):
     return response
 
 
-def register_new_agent(faction: str, agent_name: str, email: str = None, priority: str = "NORMAL"):
+def register_new_agent(account_token: str, faction: str, agent_name: str, email: str = None, priority: str = "NORMAL"):
     payload = {
         "faction": faction,
         "symbol": agent_name
     }
     if email:
         payload["email"] = email
-    response = RH.post("register", payload, priority=priority).json()
+    response = RH.post("register", payload, priority=priority, token=account_token).json()
     return response
 
 

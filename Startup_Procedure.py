@@ -9,8 +9,26 @@ def fill_table_defaults():
     command_ship_name = UNAME + "-1"
     satellite_ship_name = UNAME + "-2"
 
-    dbFunctions.access_add_ship_assignment(command_ship_name, True, "COMMAND_PHASE_A", SYSTEM)
-    dbFunctions.access_add_ship_assignment(satellite_ship_name, True, "MARKET_SCOUT", SYSTEM)
+    with get_cursor() as cursor:
+        cursor.execute("SELECT * FROM ShipAssignments")
+        need_to_add = [command_ship_name, satellite_ship_name]
+        for row in cursor:
+            try:
+                need_to_add.remove(row[0])
+            except ValueError:
+                pass
+        if command_ship_name in need_to_add:
+            dbFunctions.access_add_ship_assignment(command_ship_name, True, "COMMAND_PHASE_A", SYSTEM)
+        if satellite_ship_name in need_to_add:
+            dbFunctions.access_add_ship_assignment(satellite_ship_name, True, "MARKET_SCOUT", SYSTEM)
+
+        cursor.execute("SELECT * FROM Transactions")
+        if cursor.fetchone() is None:
+            agent = api_functions.get_agent(TOKEN)
+            starting_credits = agent["data"]["credits"]
+            hq = agent["data"]["headquarters"]
+            dbFunctions.access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "transactionTime"], [command_ship_name, hq, SYSTEM, starting_credits, datetime.now(timezone.utc)])
+
 
     # all_systems = dbFunctions.get_all_systems()
     all_systems = dbFunctions.get_systems_dot_json()

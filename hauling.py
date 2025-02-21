@@ -208,7 +208,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
 
         if not p or 'data' not in p.keys():
             a = api.get_agent(TOKEN)
-            c = a['data']['credits']
+            c = a['data']['credits'] - 5000
             num_can_buy = c // origin_target_good['purchasePrice']
             num_to_buy = min(num_can_buy, num_to_buy)
         else:
@@ -224,6 +224,14 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
 
     if num_to_buy > 0 and (not max_buy_price or origin_target_good['purchasePrice'] < max_buy_price):
         p = purchase(ship, product, num_to_buy)
+
+    if not p or "data" not in p.keys():
+        a = api.get_agent(TOKEN)
+        c = a['data']['credits'] - 5000
+        num_can_buy = c // origin_target_good['purchasePrice']
+        num_to_buy = min(num_can_buy, num_to_buy)
+        if num_to_buy > 0:
+            p = purchase(ship, product, num_to_buy)
 
     if p and 'data' in p.keys():
         cargo = p['data']['cargo']
@@ -412,7 +420,7 @@ def choose_trade_run_loop(system, ship, ignored_goods=None, loop=True, ship_data
     do_once = True
 
     while loop or do_once:
-        loop = False
+        do_once = False
         profitable_trades = dbFunctions.access_profitable_trades(system)
 
         i = 0
@@ -468,16 +476,28 @@ def stimulate_economy(system, ship, good):
     return traded_goods
 
 
-def replenish_economy(system, ship, ship_stats=None, loop=True):
+def replenish_economy(system, ship, ship_stats=None, loop=True, avoid_sourcing=None):
     do_once = True
+    if avoid_sourcing is None:
+        avoid_sourcing = []
     while loop or do_once:
         do_once = False
 
         replenishing_trades = dbFunctions.access_replenishing_trades(system)
-        if len(replenishing_trades) == 0:
+
+        acceptable_replenishing_trades = []
+
+        for trade in replenishing_trades:
+            if trade["tradeSymbol"] not in avoid_sourcing:
+                acceptable_replenishing_trades.append(trade)
+
+        if not acceptable_replenishing_trades:
             print(ship, "has no available replenishing trades in", system)
             return ship_stats
 
-        trade_to_replenish = random.choice(replenishing_trades)
+
+
+        trade_to_replenish = random.choice(acceptable_replenishing_trades)
         ship_stats = trade_run(ship, trade_to_replenish["tradeSymbol"], system, trade_to_replenish["originWaypoint"], trade_to_replenish["destinationWaypoint"], ship_stats=ship_stats)
+
     return ship_stats

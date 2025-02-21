@@ -50,8 +50,11 @@ def listSystems(limit=10, page=1):
     return data
 
 
-def listWaypointsInSystem(systemSymbol, limit=10, page=1):
-    data = api.list_waypoints_in_system(TOKEN, systemSymbol, limit=limit, page=page)
+def listWaypointsInSystem(systemSymbol, limit=10, page=1, noToken=False):
+    tok = TOKEN
+    if noToken:
+        tok = None
+    data = api.list_waypoints_in_system(tok, systemSymbol, limit=limit, page=page)
     return data
 
 

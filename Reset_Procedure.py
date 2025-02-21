@@ -3,7 +3,7 @@ import os
 import shutil
 
 from __SHARED import get_cursor
-from __SECRETS import UNAME, EMAIL
+from __SECRETS import UNAME
 import api_requests.raw_api_requests as rar
 
 cursor = get_cursor()
@@ -48,7 +48,15 @@ def clear_db():
 
 
 def new_secrets():
-    response = rar.register_new_agent(STARTING_FACTION, TARGET_UNAME, EMAIL)
+
+    cursor.execute("SELECT * FROM Account")
+    account_info = cursor.fetchone()
+
+    account_token = account_info[0]
+    email = account_info[1]
+
+
+    response = rar.register_new_agent(account_token, STARTING_FACTION, TARGET_UNAME, email)
     if "data" not in response.keys():
         print("Failed to register new agent")
         return response

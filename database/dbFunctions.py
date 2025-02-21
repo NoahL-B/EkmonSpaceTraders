@@ -233,12 +233,12 @@ def get_systems_dot_json():
     return api.raw_api_requests.RH.get(endpoint).json()
 
 
-def get_all_waypoints_in_system(systemSymbol):
+def get_all_waypoints_in_system(systemSymbol, noToken=False):
     system_waypoints = []
 
     waypoints_per_page = 20
 
-    first_page = listWaypointsInSystem(systemSymbol, waypoints_per_page)
+    first_page = listWaypointsInSystem(systemSymbol, waypoints_per_page, noToken=noToken)
     for i in range(len(first_page['data'])):
         system_waypoints.append(first_page["data"][i])
 
@@ -249,7 +249,7 @@ def get_all_waypoints_in_system(systemSymbol):
         num_pages += 1
 
     for page in range(2, num_pages + 1):
-        l = listWaypointsInSystem(systemSymbol, waypoints_per_page, page)
+        l = listWaypointsInSystem(systemSymbol, waypoints_per_page, page, noToken=noToken)
         for i in range(len(l['data'])):
             system_waypoints.append(l["data"][i])
 
@@ -269,7 +269,7 @@ def get_all_waypoints(all_systems):
     return all_waypoints
 
 
-def get_all_waypoints_generator(all_systems, unknown_only=False):
+def get_all_waypoints_generator(all_systems, unknown_only=False, noToken=False):
     notable_systems = get_notable_systems(all_systems)
 
     if unknown_only:
@@ -279,7 +279,7 @@ def get_all_waypoints_generator(all_systems, unknown_only=False):
 
     for s in notable_systems:
         systemSymbol = s["symbol"]
-        system_waypoints = get_all_waypoints_in_system(systemSymbol)
+        system_waypoints = get_all_waypoints_in_system(systemSymbol, noToken=noToken)
         for wp in system_waypoints:
             yield wp
 
@@ -367,7 +367,7 @@ def populate_shipyards():
             api.get_shipyard(TOKEN, wp_system, wp_name)
 
 
-def populate_waypoints(all_systems):
+def populate_waypoints(all_systems, noToken=False):
     access_waypoints = get_waypoints_from_access()
     access_waypoint_symbols = []
     for awp in access_waypoints:
@@ -375,7 +375,7 @@ def populate_waypoints(all_systems):
 
     counter = 0
 
-    for wp in get_all_waypoints_generator(all_systems, True):
+    for wp in get_all_waypoints_generator(all_systems, True, noToken=noToken):
         wp_obj = Waypoint.Waypoint(wp)
         populate_waypoint(wp_obj, access_waypoint_symbols)
         counter += 1
@@ -1024,6 +1024,16 @@ def access_profitable_trades(system):
             possible_trades.append(possible_trade)
     return possible_trades
 
+@too_many_tables_handler
+def access_system_profits(system):
+    cmd = "SELECT * FROM SystemProfits WHERE System=?"
+    with get_cursor() as cursor:
+        cursor.execute(cmd, system)
+        try:
+            system_profits = cursor.fetchone()[1]
+        except TypeError:
+            system_profits = 0
+    return system_profits
 
 
 if __name__ == '__main__':

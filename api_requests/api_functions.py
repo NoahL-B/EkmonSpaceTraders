@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import time
 
 import api_requests.raw_api_requests as raw_api_requests
-from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, jump_ship, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, get_repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
+from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, get_repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
 from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate, access_insert_entry
 
 
@@ -14,6 +14,20 @@ def waypoint_name_to_system_name(waypoint_name: str):
     name_list = waypoint_name.split("-")
     system_name = name_list[0] + "-" + name_list[1]
     return system_name
+
+
+def jump_ship(token:str, shipSymbol:str, waypointSymbol:str, priority:str = "NORMAL"):
+    j = jump_ship(token, shipSymbol, waypointSymbol, priority)
+    if "data" in j.keys():
+        waypoint = j['data']['transaction']['waypointSymbol']
+        system = waypoint_name_to_system_name(waypoint)
+        credits = j["data"]["transaction"]["totalPrice"] * -1
+        trade_symbol = j["data"]["transaction"]["tradeSymbl"]
+        timeStamp = datetime.now(timezone.utc)
+        access_insert_entry("Transactions",
+                            ["Ship", "Waypoint", "System", "Credits", "TradeGood", "Quantity", "transactionTime"],
+                            [shipSymbol, waypoint, system, credits, trade_symbol, 0, timeStamp])
+    return j
 
 
 def get_jump_gate(token: str | None, systemSymbol: str, waypointSymbol: str, priority: str = "NORMAL"):
@@ -181,7 +195,7 @@ def navigate(token, ship, location, nav_and_sleep=False):
                 return to_return
         elif nav['status'] == 'DOCKED':
             orbit_ship(token, ship)
-            return navigate(ship, location, nav_and_sleep)
+            return navigate(token, ship, location, nav_and_sleep)
         elif nav['status'] == 'IN_ORBIT':
             if nav['route']['destination']['symbol'] == location:
                 return ship_status
@@ -241,6 +255,12 @@ def buyShip(token: str, shipyard: str, shipType: str):
 
 def scrap_ship(token: str, shipSymbol: str, priority="NORMAL"):
     sold_ship = raw_api_requests.scrap_ship(token, shipSymbol, priority)
+
+    if "error" in sold_ship.keys():
+        if sold_ship["error"]["code"] == 4244:
+            dock_ship(token, shipSymbol, priority)
+            sold_ship = raw_api_requests.scrap_ship(token, shipSymbol, priority)
+
     if "data" in sold_ship.keys():
         waypoint = sold_ship["data"]["transaction"]["waypointSymbol"]
         system = waypoint_name_to_system_name(waypoint)

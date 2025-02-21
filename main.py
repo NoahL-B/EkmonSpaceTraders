@@ -589,7 +589,7 @@ def minerLoop(ship, lock=None, surveys=None):
                 print(ship + ": " + str(extraction))
             elif extraction['data']['extraction']['yield']['units'] > 0:
                 # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
-                if extraction['data']['extraction']['yield']['symbol'] in ["ICE_WATER"]:
+                if extraction['data']['extraction']['yield']['symbol'] not in ['IRON', 'QUARTZ_SAND', 'IRON_ORE', 'ELECTRONICS', 'MICROPROCESSORS', 'SILICON_CRYSTALS', 'COPPER', 'COPPER_ORE']:
                     api_functions.jettison_cargo(TOKEN, ship, extraction['data']['extraction']['yield']['symbol'],
                                                  extraction['data']['extraction']['yield']['units'],
                                                  "HIGH")  # only high priority because we don't want the mining haulers to see the item in inventory and attempt to collect it.
@@ -928,7 +928,7 @@ def commandPhaseA(ship):
         ship_type = ""
         if assignmentType == "MINING_SHIP":
             ship_type = "SHIP_MINING_DRONE"
-        elif assignmentType in ["ASTEROID_HAULER", "TRADE_HAULER", "GAS_GIANT_HAULER", "MARKET_NURSE"]:
+        elif assignmentType in ["ASTEROID_HAULER", "TRADE_HAULER", "GAS_GIANT_HAULER", "MARKET_NURSE", "COMMAND_PHASE_B"]:
             ship_type = "SHIP_LIGHT_HAULER"
         elif assignmentType == "SURVEYOR":
             ship_type = "SHIP_SURVEYOR"
@@ -1092,7 +1092,17 @@ def commandPhaseB(ship, system=None):
     headquarters = faction['data']['headquarters']
     hq_system = api_functions.waypoint_name_to_system_name(headquarters)
 
+    # disable mining ships, surveyors, and asteroid haulers
+
+    ship_assignments = dbFunctions.get_ship_roles_from_access()
+    for s in ship_assignments:
+        if s['assignmentSystem'] == system and s['hasAssignment'] and s["assignmentType"] in ["MINING_SHIP", "SURVEYOR", "ASTEROID_HAULER"]:
+            ship_name = s["shipName"]
+            dbFunctions.access_update_ship_assignment(ship_name, hasAssignment=False)
+    print("PROGRAM REQUIRES RESTART TO SHUT DOWN MINING OPERATIONS")
+
     dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_C", assignmentSystem=hq_system, assignmentWaypoint="")
+    commandPhaseC(ship, hq_system)
 
 
 def commandPhaseC(ship, system):
@@ -1319,8 +1329,11 @@ def survey_value(survey):
     divisor = len(deposits)
     value = 0
     for d in deposits:
-        d_type = d["symbol"]
-        value += material_values[d_type] / divisor
+        if d["symbol"] in ['ELECTRONICS', 'MICROPROCESSORS', 'SILICON_CRYSTALS', 'COPPER', 'COPPER_ORE']:
+            value += 1 / divisor
+
+        # d_type = d["symbol"]
+        # value += material_values[d_type] / divisor
 
     return value
 
@@ -1432,10 +1445,11 @@ def market_scout_master(ship, system):
                         auto_nav(ship, shipyard)
                         dock(ship)
                 if agent_credits == 0:
-                    agent_credits = api_functions.get_agent(TOKEN)
+                    agent_credits = api_functions.get_credits(TOKEN)
 
-                if shipyard is not None and agent_credits > 800000:
+                if shipyard is not None and dbFunctions.access_system_profits(system) > 0 and agent_credits > 1500000:
                     ship_name = api_functions.buyProbe(TOKEN, shipyard)
+                    agent_credits = 0
                     if type(ship_name) == str:
                         stationary_scout_dict[waypoint] = ship_name
                         dbFunctions.access_add_ship_assignment(ship_name, True, "STATIONARY_SCOUT", system, waypoint)
@@ -1472,9 +1486,12 @@ def market_scout_master(ship, system):
 def market_nurse(ship, system):
     ship_stats = None
     while True:
-        ship_stats = hauling.replenish_economy(system, ship, ship_stats, True)
-        ship_stats = hauling.choose_trade_run_loop(system, ship, loop=False, ship_data=ship_stats)
+        construction_materials = get_construction_materials(system)
+        ship_stats = hauling.replenish_economy(system, ship, ship_stats, True, avoid_sourcing=construction_materials.keys())
+        ship_stats = hauling.choose_trade_run_loop(system, ship, loop=False, ship_data=ship_stats, ignored_goods=construction_materials.keys())
         sleep_time = api_functions.queue_len() / 2.5
+        min_sleep_time = 20
+        sleep_time = max(sleep_time, min_sleep_time)
         time.sleep(sleep_time)
 
 
@@ -1608,7 +1625,7 @@ def start_main_when_tables_are_filled():
                 tables_filled = True
             else:
                 last_len = this_len
-        time.sleep(60)
+        time.sleep(600)
 
     api_functions.reset_pacing()
     return main()
