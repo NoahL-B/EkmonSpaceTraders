@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import time
 
+import SHARED
 import api_requests.raw_api_requests as raw_api_requests
 from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, get_repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
 from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate, access_insert_entry
@@ -16,13 +17,13 @@ def waypoint_name_to_system_name(waypoint_name: str):
     return system_name
 
 
-def jump_ship(token:str, shipSymbol:str, waypointSymbol:str, priority:str = "NORMAL"):
-    j = jump_ship(token, shipSymbol, waypointSymbol, priority)
+def jump_ship(token: str, shipSymbol: str, waypointSymbol: str, priority: str = "NORMAL"):
+    j = raw_api_requests.jump_ship(token, shipSymbol, waypointSymbol, priority)
     if "data" in j.keys():
         waypoint = j['data']['transaction']['waypointSymbol']
         system = waypoint_name_to_system_name(waypoint)
         credits = j["data"]["transaction"]["totalPrice"] * -1
-        trade_symbol = j["data"]["transaction"]["tradeSymbl"]
+        trade_symbol = j["data"]["transaction"]["tradeSymbol"]
         timeStamp = datetime.now(timezone.utc)
         access_insert_entry("Transactions",
                             ["Ship", "Waypoint", "System", "Credits", "TradeGood", "Quantity", "transactionTime"],
@@ -58,9 +59,16 @@ def get_all_contracts(token: str):
 
 
 def get_credits(token: str):
-    a = get_agent(token)
-    c = a['data']['credits']
-    return c
+    try:
+        cmd = "SELECT * FROM TotalProfits"
+        with SHARED.get_cursor() as c:
+            c.execute(cmd)
+            row = c.fetchone()
+            return row[0]
+    except TypeError:
+        a = get_agent(token)
+        c = a['data']['credits']
+        return c
 
 
 def refuel_ship(token: str, shipSymbol: str, units: int = 0, fromCargo: bool = False,  priority: str = "NORMAL"):

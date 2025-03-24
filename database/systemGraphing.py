@@ -3,29 +3,33 @@ from dijkstar import Graph, find_path
 
 # import api_requests.api_functions
 from database.dbFunctions import distance, access_get_available_jumps
-
+from threading import Lock
 
 
 MASTER_JUMP_GRAPH = None
 MASTER_WARP_GRAPH = None
-
+MASTER_GRAPH_INIT_LOCK = Lock()
 
 def init_master_jump_graph(force_new=False):
     global MASTER_JUMP_GRAPH
-    if MASTER_JUMP_GRAPH is None or force_new:
-        import database.dbFunctions as DBF
-        all_systems = DBF.access_get_detailed_systems()
-        MASTER_JUMP_GRAPH = make_dij_graph(all_systems, False)
+    with MASTER_GRAPH_INIT_LOCK:
+        if MASTER_JUMP_GRAPH is None or force_new:
+            import database.dbFunctions as DBF
+            all_systems = DBF.access_get_detailed_systems()
+            notable_systems = DBF.get_notable_systems(all_systems)
+            MASTER_JUMP_GRAPH = make_dij_graph(notable_systems, False)
 
     return MASTER_JUMP_GRAPH
 
 
 def init_master_warp_graph(force_new=False):
     global MASTER_WARP_GRAPH
-    if MASTER_WARP_GRAPH is None or force_new:
-        import database.dbFunctions as DBF
-        all_systems = DBF.access_get_detailed_systems()
-        MASTER_WARP_GRAPH = make_dij_graph(all_systems, True)
+    with MASTER_GRAPH_INIT_LOCK:
+        if MASTER_WARP_GRAPH is None or force_new:
+            import database.dbFunctions as DBF
+            all_systems = DBF.access_get_detailed_systems()
+            notable_systems = DBF.get_notable_systems(all_systems)
+            MASTER_WARP_GRAPH = make_dij_graph(notable_systems, True)
 
     return MASTER_WARP_GRAPH
 

@@ -196,13 +196,20 @@ def dist_systems(start_system, all_systems):
 
 
 def is_charted(system):
+    if type(system) is str:
+        system = access_get_detailed_systems(system)[0]
+
     if len(system["waypoints"]) == 0:
         return True
 
     wp = system["waypoints"][0]
 
-    wp_obj = Waypoint.getWaypoint(system["symbol"], wp["symbol"])
-    for t in wp_obj.traits:
+    if "traits" in wp.keys():
+        traits = wp["traits"]
+    else:
+        wp_obj = Waypoint.getWaypoint(system["symbol"], wp["symbol"])
+        traits = wp_obj.traits
+    for t in traits:
         if t["symbol"] == "UNCHARTED":
             return False
     return True
@@ -494,11 +501,16 @@ def get_systems_from_access():
 
 
 @too_many_tables_handler
-def access_get_detailed_systems():
+def access_get_detailed_systems(system=None):
     raw_systems = []
 
     with get_cursor() as cursor:
-        cursor.execute("SELECT * FROM System")
+        params = ()
+        cmd = "SELECT * FROM System"
+        if system:
+            cmd += " WHERE symbol=?"
+            params = (system,)
+        cursor.execute(cmd, params)
         for row in cursor:
             raw_systems.append(row)
 
@@ -516,7 +528,7 @@ def access_get_detailed_systems():
             }
             sys_dicts_by_name[raw_sys[0]] = complete_system
 
-    all_waypoints = get_waypoints_from_access()
+    all_waypoints = get_waypoints_from_access(system=system)
 
     for full_wp in all_waypoints:
         faction = None
@@ -1023,6 +1035,7 @@ def access_profitable_trades(system):
             }
             possible_trades.append(possible_trade)
     return possible_trades
+
 
 @too_many_tables_handler
 def access_system_profits(system):

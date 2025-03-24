@@ -115,7 +115,8 @@ def navigate(ship, location, nav_and_sleep=False):
     return api_functions.navigate(TOKEN, ship, location, nav_and_sleep)
 
 
-def auto_nav(ship, destination, ship_stats=None):
+def auto_nav(ship, destination, ship_stats=None, cargo_refuel=False):
+
     if ship_stats is None:
         ship_stats = get_ship(ship)
 
@@ -228,7 +229,7 @@ def auto_nav(ship, destination, ship_stats=None):
                     if t['symbol'] == "MARKETPLACE":
                         next_wp_market = True
 
-        if not next_wp_market:
+        if this_wp_market and not next_wp_market:
             fueled_up = False
 
         if fuel == fuel_cap:
@@ -244,7 +245,57 @@ def auto_nav(ship, destination, ship_stats=None):
             if "data" in refuel_response.keys():
                 fueled_up = True
                 fuel = refuel_response["data"]["fuel"]["current"]
+
+            if cargo_refuel:
+                cargo_needed = ship_stats["data"]["cargo"]["capacity"] - ship_stats["data"]["cargo"]["units"]
+                if cargo_needed > 0:
+                    market = dbFunctions.access_get_market(ship_stats["data"]["nav"]["waypointSymbol"])
+                    for m in market:
+                        if m["symbol"] == "FUEL":
+                            while cargo_needed > 0:
+                                tv = m["tradeVolume"]
+                                to_purchase = min(tv, cargo_needed)
+                                p = purchase(ship, "FUEL", to_purchase)
+                                if "data" in p.keys():
+                                    ship_stats["data"]["cargo"] = p["data"]["cargo"]
+                                    cargo_needed = ship_stats["data"]["cargo"]["capacity"] - ship_stats["data"]["cargo"]["units"]
+                                else:
+                                    print(ship + " failed cargo purchase while auto-navigating")
+                                    cargo_needed = 0
             orbit(ship)
+
+        if not fueled_up and not this_wp_market and cargo_refuel:
+            additional_fuel_required = fuel_required - fuel
+            additional_fuel_capacity = fuel_cap - fuel
+            adjusted_additional_fuel_capacity = additional_fuel_capacity - additional_fuel_capacity % 100
+            if additional_fuel_required > adjusted_additional_fuel_capacity:
+                adjusted_additional_fuel_capacity += 100
+
+            cargo_units_to_refuel = adjusted_additional_fuel_capacity // 100
+
+            if additional_fuel_capacity < adjusted_additional_fuel_capacity:
+                adjusted_additional_fuel_capacity = additional_fuel_capacity
+
+            cargo_units_owned = 0
+            cargo_good = None
+
+            for c in ship_stats["data"]["cargo"]["inventory"]:
+                if c["symbol"] == "FUEL":
+                    cargo_units_owned = c["units"]
+                    cargo_good = c
+
+            if cargo_units_owned < cargo_units_to_refuel:
+                adjusted_additional_fuel_capacity = cargo_units_owned * 100
+                cargo_units_to_refuel = cargo_units_owned
+
+            if cargo_units_to_refuel > 0:
+                refuel_response = api_functions.refuel_ship(TOKEN, ship, adjusted_additional_fuel_capacity, True)
+                if "data" in refuel_response.keys():
+                    ship_stats["data"]["fuel"] = refuel_response["data"]["fuel"]
+                    cargo_good["units"] -= cargo_units_to_refuel
+                    if ship_stats["data"]["fuel"]["current"] > fuel_required:
+                        fueled_up = True
+
 
         if fueled_up:
             nav = navigate(ship, path.nodes[waypoint_num + 1], True)
@@ -295,7 +346,7 @@ def warp(ship, waypoint, warp_and_sleep=False):
 
 
 
-def auto_jump_warp(ship, destination_system):
+def auto_jump_warp(ship, destination_system, cargo_refuel=False):
     ship_stats = get_ship(ship)
     origin_system = ship_stats['data']['nav']['systemSymbol']
     status = ship_stats['data']['nav']['status']
@@ -309,11 +360,13 @@ def auto_jump_warp(ship, destination_system):
             can_warp = True
 
     if status == "DOCKED":
-        orbit(ship)
+        nav = orbit(ship)["data"]["nav"]
+        ship_stats["data"]["nav"] = nav
     elif status == "IN_TRANSIT":
         sleep_until_arrival(ship)
+        ship_stats["data"]["nav"]["status"] = "IN_ORBIT"
     if origin_system == destination_system:
-        return
+        return ship_stats
 
     local_jump_gate = None
     local_waypoints = dbFunctions.get_waypoints_from_access(origin_system)
@@ -327,13 +380,15 @@ def auto_jump_warp(ship, destination_system):
             waypoints = dbFunctions.get_waypoints_from_access(destination_system)
             destination_waypoint = random.choice(waypoints)['symbol']
             warp(ship, destination_waypoint, False)
-            api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+            nav = api_functions.patch_ship_nav(TOKEN, ship, "BURN")["data"]["nav"]
+            ship_stats["data"]["nav"] = nav
             sleep_until_arrival(ship)
-            return
+            ship_stats["data"]["nav"]["status"] = "IN_ORBIT"
+            return ship_stats
         else:
             print("No jump gate is available, and", ship, "cannot warp!")
 
-    auto_nav(ship, local_jump_gate)
+    ship_stats = auto_nav(ship, local_jump_gate, ship_stats, cargo_refuel=cargo_refuel)
     jump_graph = init_master_jump_graph()
     jump_path = dij_path(jump_graph, origin_system, destination_system)
     if jump_path is not None:
@@ -346,10 +401,14 @@ def auto_jump_warp(ship, destination_system):
             if jump_num < len(jump_path.edges):
                 cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
                 time.sleep(api_functions.cooldown_to_time_delay(cooldown))
-                jump(ship, next_jump_gate, True)
+                nav = jump(ship, next_jump_gate, True)["data"]["nav"]
+                ship_stats["data"]["nav"] = nav
                 get_jump_gate(api_functions.waypoint_name_to_system_name(next_jump_gate), next_jump_gate)
             else:
-                jump(ship, next_jump_gate, False)
+                cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
+                time.sleep(api_functions.cooldown_to_time_delay(cooldown))
+                nav = jump(ship, next_jump_gate, False)["data"]["nav"]
+                ship_stats["data"]["nav"] = nav
                 get_jump_gate(api_functions.waypoint_name_to_system_name(next_jump_gate), next_jump_gate)
 
     else:
@@ -362,9 +421,11 @@ def auto_jump_warp(ship, destination_system):
                 waypoints = dbFunctions.get_waypoints_from_access(destination_system)
                 destination_waypoint = random.choice(waypoints)['symbol']
                 result = api_functions.warp_ship(TOKEN, ship, destination_waypoint)
-                api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                nav = api_functions.patch_ship_nav(TOKEN, ship, "BURN")["data"]["nav"]
+                ship_stats["data"]["nav"] = nav
                 sleep_until_arrival(ship)
-                return
+                ship_stats["data"]["nav"]["status"] = "IN_ORBIT"
+                return ship_stats
 
 
             travel_num = 0
@@ -386,7 +447,7 @@ def auto_jump_warp(ship, destination_system):
                 # note that the path finding algorithm accounts for whether it will be able to successfully jump here, not whether it tries to jump here.
                 if jump_info:
                     this_waypoint, next_waypoint = jump_info
-                    auto_nav(ship, this_waypoint)
+                    ship_stats = auto_nav(ship, this_waypoint)
                     get_jump_gate(api_functions.waypoint_name_to_system_name(this_waypoint), this_waypoint)
 
                     cooldown = api_functions.get_ship_cooldown(TOKEN, ship)
@@ -395,6 +456,7 @@ def auto_jump_warp(ship, destination_system):
                     result = jump(ship, next_waypoint, False)
                     if "data" in result.keys():
                         successfully_jumped = True
+                        ship_stats["data"]["nav"] = result["data"]["nav"]
 
                 # warp if there was a missing jump gate, or if the jump failed to a jump gate still being built.
                 if not successfully_jumped:
@@ -414,15 +476,18 @@ def auto_jump_warp(ship, destination_system):
 
                     api_functions.patch_ship_nav(TOKEN, ship, "DRIFT")
                     warp(ship, next_waypoint, False)
-                    api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                    nav = api_functions.patch_ship_nav(TOKEN, ship, "BURN")["data"]["nav"]
+                    ship_stats["data"]["nav"] = nav
                     sleep_until_arrival(ship)
-
+                    ship_stats["data"]["nav"]["status"] = "IN_ORBIT"
 
 
                 travel_num += 1
 
         else:
             print("Too complicated a jump/warp to complete")
+
+    return ship_stats
 
 
 
@@ -504,8 +569,9 @@ def sleep_until_arrival(ship, sleep_counter=False, ship_data=None):
     return ship_data
 
 
-def chart_system(ship):
-    ship_stats = get_ship(ship)
+def chart_system(ship, ship_stats=None, cargo_refuel=False):
+    if ship_stats is None:
+        ship_stats = get_ship(ship)
     system = ship_stats['data']['nav']['systemSymbol']
     waypoints = dbFunctions.get_waypoints_from_access(system)
     chart_count = 0
@@ -539,9 +605,9 @@ def chart_system(ship):
                 charted = False
         if not charted:
             print("Closest uncharted waypoint to", ship, "is", closest_wp['symbol'], "at a distance of", closest_distance, "(with", len(waypoints), "waypoints left, inclusive)")
-            auto_nav(ship, closest_wp['symbol'])
+            ship_stats = auto_nav(ship, closest_wp['symbol'], ship_stats, cargo_refuel=cargo_refuel)
             c = chart_wp(ship)
-            if c:
+            if "data" in c.keys():
                 chart_count += 1
                 wp_obj = Waypoint(c['data']['waypoint'])
             else:
@@ -553,9 +619,30 @@ def chart_system(ship):
                     for good in mark["data"]["tradeGoods"]:
                         if good["symbol"] == "FUEL":
                             dock(ship)
-                            refuel(ship)
+                            f = refuel(ship)
+                            ship_stats["data"]["fuel"] = f["data"]["fuel"]
+                            if cargo_refuel:
+                                cargo_needed = ship_stats["data"]["cargo"]["capacity"] - ship_stats["data"]["cargo"]["units"]
+                                while cargo_needed > 0:
+                                    tv = good["tradeVolume"]
+                                    to_purchase = min(tv, cargo_needed)
+                                    p = purchase(ship, "FUEL", to_purchase)
+                                    if "data" in p.keys():
+                                        ship_stats["data"]["cargo"] = p["data"]["cargo"]
+                                        cargo_needed = ship_stats["data"]["cargo"]["capacity"] - ship_stats["data"]["cargo"]["units"]
+                                    else:
+                                        print(ship + " failed cargo purchase while charting " + system)
+                                        cargo_needed = 0
+
                             orbit(ship)
-                            api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                            if ship_stats["data"]["nav"]["flightMode"] != "BURN":
+                                api_functions.patch_ship_nav(TOKEN, ship, "BURN")
+                                ship_stats["data"]["nav"]["flightMode"] = "BURN"
+                if t2["symbol"] == "SHIPYARD":
+                    api_functions.get_shipyard(TOKEN, wp_obj.systemSymbol, wp_obj.symbol)
+            if wp_obj.type == "JUMP_GATE":
+                api_functions.get_jump_gate(TOKEN, wp_obj.systemSymbol, wp_obj.symbol)
+                init_master_jump_graph(force_new=True)
             current_wp = closest_wp
         waypoints.remove(closest_wp)
     return chart_count
@@ -563,6 +650,80 @@ def chart_system(ship):
 
 def chart_wp(ship):
     return api_functions.create_chart(TOKEN, ship)
+
+
+def charting_explorer(ship, system=None, cargo_refuel=True):
+
+    if not system:
+        ship_stats = get_ship(ship)
+        system = ship_stats["data"]["nav"]["systemSymbol"]
+
+    def choose_new_system(old_system):
+
+        claimed_systems = []
+        roles = dbFunctions.get_ship_roles_from_access()
+        for r in roles:
+            if r["hasAssignment"] and r["assignmentType"] == "CHARTING_EXPLORER":
+                assigned_system = r["systemSymbol"]
+                claimed_systems.append(assigned_system)
+
+        all_jumps = dbFunctions.access_get_available_jumps()
+        for j in all_jumps:
+            if j[2] == old_system:
+                dest = j[4]
+                if not dbFunctions.is_charted(dest):
+                    if dest not in claimed_systems:
+                        return dest
+
+        jump_graph = init_master_jump_graph()
+        csl = connected_systems_list(jump_graph, old_system)
+        random.shuffle(csl)
+
+        path = None
+
+        for s in csl:
+            if not dbFunctions.is_charted(s):
+                if s not in claimed_systems:
+                    path = dij_path(jump_graph, old_system, s)
+                    break
+
+        if not path:
+            warp_graph = init_master_warp_graph()
+            csl = connected_systems_list(warp_graph, old_system)
+            random.shuffle(csl)
+
+            for s in csl:
+                if not dbFunctions.is_charted(s):
+                    if s not in claimed_systems:
+                        path = dij_path(warp_graph, old_system, s)
+                        break
+
+        i = 0
+        while i < len(path) + 1:
+            s = path.nodes[i]
+            s = api_functions.waypoint_name_to_system_name(s)
+            if not dbFunctions.is_charted(s):
+                return s
+            i += 1
+
+    def stuck_ship(ship_stats):
+        stuck = False
+        if ship_stats["data"]["fuel"]["current"] == 0:
+            stuck = True
+            for item in ship_stats["data"]["cargo"]["inventory"]:
+                if item["symbol"] == "FUEL" and item["units"] > 0:
+                    stuck = False
+        return stuck
+
+
+    while True:
+        ship_stats = auto_jump_warp(ship, system, cargo_refuel=cargo_refuel)
+        if stuck_ship(ship_stats):
+            dbFunctions.access_update_ship_assignment(ship, hasAssignment=False)
+            break
+        chart_system(ship, ship_stats, cargo_refuel=cargo_refuel)
+        system = choose_new_system(system)
+        dbFunctions.access_update_ship_assignment(ship, assignmentSystem=system)
 
 
 
@@ -1085,6 +1246,7 @@ def commandPhaseB(ship, system=None):
     this_system = dbFunctions.get_system(SYSTEM, all_systems)
     dbFunctions.populate_waypoints([this_system])
     dbFunctions.populate_jump_gates()
+    init_master_jump_graph(force_new=True)
 
     agent = api_functions.get_agent(TOKEN)
     faction_name = agent['data']['startingFaction']
@@ -1093,10 +1255,11 @@ def commandPhaseB(ship, system=None):
     hq_system = api_functions.waypoint_name_to_system_name(headquarters)
 
     # disable mining ships, surveyors, and asteroid haulers
+    # TODO: turn asteroid haulers into contract haulers after I build the contract function
 
     ship_assignments = dbFunctions.get_ship_roles_from_access()
     for s in ship_assignments:
-        if s['assignmentSystem'] == system and s['hasAssignment'] and s["assignmentType"] in ["MINING_SHIP", "SURVEYOR", "ASTEROID_HAULER"]:
+        if s['systemSymbol'] == system and s['hasAssignment'] and s["assignmentType"] in ["MINING_SHIP", "SURVEYOR", "ASTEROID_HAULER"]:
             ship_name = s["shipName"]
             dbFunctions.access_update_ship_assignment(ship_name, hasAssignment=False)
     print("PROGRAM REQUIRES RESTART TO SHUT DOWN MINING OPERATIONS")
@@ -1560,6 +1723,8 @@ def main():
                 t = threading.Thread(target=commandPhaseC, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
             elif ship_role['assignmentType'] == "MARKET_NURSE":
                 t = threading.Thread(target=market_nurse, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
+            elif ship_role['assignmentType'] == "CHARTING_EXPLORER":
+                t = threading.Thread(target=charting_explorer, args=(ship_role['shipName'], ship_role['systemSymbol']), daemon=True)
             elif ship_role['assignmentType'] in ["", "STATIONARY_SCOUT"]:
                 pass
             else:

@@ -25,7 +25,8 @@ def server_error_retry(func, max_tries=3):
         result = func(*args, **kwargs)
         tries = 1
         while 500 <= result.status_code <= 599 and tries < max_tries:
-            print("SERVER FAILURE")
+            print("SERVER FAILURE", result)
+            print(result.json())
             tries += 1
             time.sleep(2 ** tries / 2)
             result = func(*args, **kwargs)
