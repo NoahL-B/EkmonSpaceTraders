@@ -1,6 +1,7 @@
 import datetime as dt
 import os
 import shutil
+import time
 
 from __SHARED import get_cursor
 from __SECRETS import UNAME
@@ -55,6 +56,18 @@ def new_secrets():
     account_token = account_info[0]
     email = account_info[1]
 
+    down_for_maintenance = True
+    while down_for_maintenance:
+        status = rar.get_status(None)
+        if "error" in status.keys():
+            if status["error"]["code"] == 503:
+                time.sleep(15)
+            else:
+                print(status)
+                print("Unexpected status error")
+                return status
+        else:
+            down_for_maintenance = False
 
     response = rar.register_new_agent(account_token, STARTING_FACTION, TARGET_UNAME, email)
     if "data" not in response.keys():
@@ -71,7 +84,7 @@ def new_secrets():
 def main():
     copy_old_data()
     clear_db()
-    new_secrets()
+    return new_secrets()
 
 
 if __name__ == '__main__':

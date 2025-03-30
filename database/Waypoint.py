@@ -53,8 +53,8 @@ class Waypoint:
 
 
 
-def getWaypoint(systemSymbol, waypointSymbol):
-    data = api.get_waypoint(TOKEN, systemSymbol, waypointSymbol)['data']
+def getWaypoint(systemSymbol, waypointSymbol, priority="NORMAL"):
+    data = api.get_waypoint(TOKEN, systemSymbol, waypointSymbol, priority=priority)['data']
     return Waypoint(data)
 
 

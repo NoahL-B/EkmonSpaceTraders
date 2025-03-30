@@ -374,7 +374,7 @@ def populate_shipyards():
             api.get_shipyard(TOKEN, wp_system, wp_name)
 
 
-def populate_waypoints(all_systems, noToken=False):
+def populate_waypoints(all_systems, noToken=False, unknown_only=True):
     access_waypoints = get_waypoints_from_access()
     access_waypoint_symbols = []
     for awp in access_waypoints:
@@ -382,7 +382,7 @@ def populate_waypoints(all_systems, noToken=False):
 
     counter = 0
 
-    for wp in get_all_waypoints_generator(all_systems, True, noToken=noToken):
+    for wp in get_all_waypoints_generator(all_systems, unknown_only, noToken=noToken):
         wp_obj = Waypoint.Waypoint(wp)
         populate_waypoint(wp_obj, access_waypoint_symbols)
         counter += 1

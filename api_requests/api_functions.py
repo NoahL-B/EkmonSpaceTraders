@@ -45,20 +45,20 @@ def get_shipyard(token: str | None, systemSymbol: str, waypointSymbol: str, prio
     return shipyard
 
 
-def get_all_contracts(token: str):
+def get_all_contracts(token: str, priority="NORMAL"):
     page_num = 1
-    page = list_contracts(token, page=page_num)
+    page = list_contracts(token, page=page_num, priority=priority)
     num_contracts = page["meta"]["total"]
     all_contracts = page["data"]
 
     while num_contracts > len(all_contracts):
         page_num += 1
-        page = list_contracts(token, page=page_num)
+        page = list_contracts(token, page=page_num, priority=priority)
         all_contracts.extend(page["data"])
     return all_contracts
 
 
-def get_credits(token: str):
+def get_credits(token: str, priority="NORMAL"):
     try:
         cmd = "SELECT * FROM TotalProfits"
         with SHARED.get_cursor() as c:
@@ -66,7 +66,7 @@ def get_credits(token: str):
             row = c.fetchone()
             return row[0]
     except TypeError:
-        a = get_agent(token)
+        a = get_agent(token, priority=priority)
         c = a['data']['credits']
         return c
 
@@ -132,24 +132,24 @@ def transfer_cargo(token: str, fromShipSymbol: str, toShipSymbol: str, tradeSymb
     return result
 
 
-def get_all_ships(token: str):
+def get_all_ships(token: str, priority: str = "NORMAL"):
     page_num = 1
-    page = list_ships(token, page=page_num)
+    page = list_ships(token, page=page_num, priority=priority)
     num_ships = page["meta"]["total"]
     all_ships = page["data"]
 
     while num_ships > len(all_ships):
         page_num += 1
-        page = list_ships(token, page=page_num)
+        page = list_ships(token, page=page_num, priority=priority)
         all_ships.extend(page["data"])
     return all_ships
 
 
-def extract(token: str, shipSymbol: str, survey: dict = None):
+def extract(token: str, shipSymbol: str, survey: dict = None, priority: str = "NORMAL"):
     if survey:
-        extraction = extract_resources_with_survey(token, shipSymbol, survey)
+        extraction = extract_resources_with_survey(token, shipSymbol, survey, priority)
     else:
-        extraction = extract_resources(token, shipSymbol)
+        extraction = extract_resources(token, shipSymbol, priority)
 
     if "data" in extraction.keys():
         symbol = extraction["data"]["extraction"]["yield"]["symbol"]
@@ -188,11 +188,11 @@ def cooldown_to_time_delay(cooldown):
         raise e
 
 
-def navigate(token, ship, location, nav_and_sleep=False):
-    to_return = navigate_ship(token, ship, location)
+def navigate(token, ship, location, nav_and_sleep=False, priority="NORMAL"):
+    to_return = navigate_ship(token, ship, location, priority)
 
     if "data" not in to_return.keys():
-        ship_status = get_ship(token, ship)
+        ship_status = get_ship(token, ship, priority)
         nav = ship_status['data']['nav']
         if nav['status'] == 'IN_TRANSIT':
             if nav['route']['destination']['symbol'] == location:
@@ -202,8 +202,8 @@ def navigate(token, ship, location, nav_and_sleep=False):
             else:
                 return to_return
         elif nav['status'] == 'DOCKED':
-            orbit_ship(token, ship)
-            return navigate(token, ship, location, nav_and_sleep)
+            orbit_ship(token, ship, priority)
+            return navigate(token, ship, location, nav_and_sleep, priority)
         elif nav['status'] == 'IN_ORBIT':
             if nav['route']['destination']['symbol'] == location:
                 return ship_status
@@ -241,13 +241,16 @@ def findShipyard(system, ship_type):
                     if s['type'] == ship_type:
                         return wp['symbol']
 
+    print("The findShipyard routine still failed.")
+    return None
 
-def buyShip(token: str, shipyard: str, shipType: str):
+
+def buyShip(token: str, shipyard: str, shipType: str, priority: str = "NORMAL"):
     purchasedShip = purchase_ship(token, shipType, shipyard)
     if "data" in purchasedShip.keys():
         shipName = purchasedShip["data"]["ship"]["symbol"]
-        orbit_ship(token, shipName)
-        patch_ship_nav(token, shipName, "BURN")
+        orbit_ship(token, shipName, priority)
+        patch_ship_nav(token, shipName, "BURN", priority)
         print("Purchased new ship:", shipName)
 
         waypoint = purchasedShip["data"]["ship"]["nav"]["waypointSymbol"]
@@ -300,36 +303,36 @@ def get_market(token, systemSymbol, waypointSymbol, priority="NORMAL"):
     return market_obj
 
 
-def buyLightHauler(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_LIGHT_HAULER")
+def buyLightHauler(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_LIGHT_HAULER", priority)
 
 
-def buyRefiningFreighter(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_REFINING_FREIGHTER")
+def buyRefiningFreighter(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_REFINING_FREIGHTER", priority)
 
 
-def buyMiningDrone(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_MINING_DRONE")
+def buyMiningDrone(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_MINING_DRONE", priority)
 
 
-def buyExplorer(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_EXPLORER")
+def buyExplorer(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_EXPLORER", priority)
 
 
-def buyOreHound(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_ORE_HOUND")
+def buyOreHound(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_ORE_HOUND", priority)
 
 
-def buySurveyor(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_SURVEYOR")
+def buySurveyor(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_SURVEYOR", priority)
 
 
-def buyProbe(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_PROBE")
+def buyProbe(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_PROBE", priority)
 
 
-def buySiphonDrone(token, shipyard):
-    return buyShip(token, shipyard, "SHIP_SIPHON_DRONE")
+def buySiphonDrone(token, shipyard, priority="NORMAL"):
+    return buyShip(token, shipyard, "SHIP_SIPHON_DRONE", priority)
 
 
 def queue_len():
