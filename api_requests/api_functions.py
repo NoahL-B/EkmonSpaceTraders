@@ -13,8 +13,11 @@ def reset_pacing():
 
 def waypoint_name_to_system_name(waypoint_name: str):
     name_list = waypoint_name.split("-")
-    system_name = name_list[0] + "-" + name_list[1]
-    return system_name
+    if len(name_list) >= 2:
+        system_name = name_list[0] + "-" + name_list[1]
+        return system_name
+    else:
+        return None
 
 
 def jump_ship(token: str, shipSymbol: str, waypointSymbol: str, priority: str = "NORMAL"):

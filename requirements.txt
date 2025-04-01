@@ -2,3 +2,4 @@ Dijkstar~=2.6.0
 pyodbc
 ratelimit
 pygame
+requests
