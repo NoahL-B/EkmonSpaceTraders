@@ -4,8 +4,9 @@ import time
 import threading
 from datetime import datetime, timedelta, timezone
 
+import SHARED
 import economy
-from SECRETS import TOKEN
+from SECRETS import *
 from SHARED import *
 
 
@@ -17,25 +18,30 @@ from database.systemGraphing import *
 SYSTEM = ""
 ASTEROIDS = ""
 GAS_GIANT = ""
-
+last_hundred_survey_values = [0 for _ in range(100)]
 
 
 def init_globals():
     global SYSTEM
     global ASTEROIDS
     global GAS_GIANT
+    global last_hundred_survey_values
 
     agent = api_functions.get_agent(TOKEN)
     hq = agent["data"]["headquarters"]
     hql = hq.split("-")
     SYSTEM = hql[0] + "-" + hql[1]
 
-    waypoints_list = dbFunctions.get_all_waypoints_in_system(SYSTEM)
+    waypoints_list = dbFunctions.get_waypoints_from_access(SYSTEM)
+
+    # waypoints_list = dbFunctions.get_all_waypoints_in_system(SYSTEM)
     for wp in waypoints_list:
         if wp['type'] == "ENGINEERED_ASTEROID":
             ASTEROIDS = wp['symbol']
         elif wp['type'] == "GAS_GIANT":
             GAS_GIANT = wp['symbol']
+
+    last_hundred_survey_values = [0 for _ in range(100)]
 
 
 def get_all_contracts():
@@ -112,10 +118,15 @@ def purchase(ship, item, units, priority="NORMAL"):
 
 
 def navigate(ship, location, nav_and_sleep=False, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     return api_functions.navigate(TOKEN, ship, location, nav_and_sleep, priority=priority)
 
 
 def auto_nav(ship, destination, ship_stats=None, cargo_refuel=False, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
 
     if ship_stats is None:
         ship_stats = get_ship(ship, priority=priority)
@@ -343,6 +354,9 @@ def get_jump_gate(system, waypoint, priority="NORMAL"):
 
 
 def jump(ship, waypoint, jump_and_sleep=False, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     to_return = api_functions.jump_ship(TOKEN, ship, waypoint, priority)
     if jump_and_sleep:
         sleep_time = to_return["data"]["cooldown"]["totalSeconds"]
@@ -351,6 +365,9 @@ def jump(ship, waypoint, jump_and_sleep=False, priority="NORMAL"):
 
 
 def warp(ship, waypoint, warp_and_sleep=False, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     to_return = api_functions.warp_ship(TOKEN, ship, waypoint, priority=priority)
     if warp_and_sleep:
         sleep_time = nav_to_time_delay(to_return)
@@ -360,6 +377,9 @@ def warp(ship, waypoint, warp_and_sleep=False, priority="NORMAL"):
 
 
 def auto_jump_warp(ship, destination_system, cargo_refuel=False, ship_stats=None, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     if ship_stats is None:
         ship_stats = get_ship(ship, priority)
     origin_system = ship_stats['data']['nav']['systemSymbol']
@@ -550,6 +570,9 @@ def get_ship(ship, priority="NORMAL"):
 
 
 def sleep_until_arrival(ship, sleep_counter=False, ship_data=None, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     if ship_data is None:
         ship_data = get_ship(ship, priority)
     nav_data = ship_data
@@ -562,6 +585,8 @@ def sleep_until_arrival(ship, sleep_counter=False, ship_data=None, priority="NOR
         now = datetime.now()
         end = now + timedelta(seconds=sleep_time)
         while now < end:
+            if stop_flag.is_set():
+                raise ThreadStoppedException()
             diff = end - now
             d = diff // timedelta(days=1)
             h = diff // timedelta(hours=1) % 24
@@ -573,13 +598,17 @@ def sleep_until_arrival(ship, sleep_counter=False, ship_data=None, priority="NOR
             time.sleep(1)
             now = datetime.now()
     else:
-        time.sleep(sleep_time)
+        tka_sleep(sleep_time)
+        # time.sleep(sleep_time)
     ship_data["data"]["nav"]["status"] = "IN_ORBIT"
 
     return ship_data
 
 
 def chart_system(ship, ship_stats=None, cargo_refuel=False, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     if ship_stats is None:
         ship_stats = get_ship(ship, priority)
     system = ship_stats['data']['nav']['systemSymbol']
@@ -602,6 +631,10 @@ def chart_system(ship, ship_stats=None, cargo_refuel=False, priority="NORMAL"):
                   'x': ship_stats['data']['nav']['route']['destination']['x'],
                   'y': ship_stats['data']['nav']['route']['destination']['y']}
     while len(waypoints) > 0:
+
+        if stop_flag.is_set():
+            raise ThreadStoppedException()
+
         closest_wp = waypoints[0]
         closest_distance = dbFunctions.distance(current_wp, closest_wp)
         for wp in waypoints:
@@ -733,7 +766,7 @@ def charting_explorer(ship, system=None, cargo_refuel=True, priority="NORMAL"):
         return stuck
 
 
-    while True:
+    while not stop_flag.is_set():
         ship_stats = auto_jump_warp(ship, system, cargo_refuel=cargo_refuel, priority=priority)
         if stuck_ship(ship_stats):
             dbFunctions.access_update_ship_assignment(ship, hasAssignment=False)
@@ -749,7 +782,7 @@ def minerLoop(ship, lock=None, surveys=None, priority="NORMAL"):
     cooldown = api_functions.get_ship_cooldown(TOKEN, ship, priority)
     time.sleep(api_functions.cooldown_to_time_delay(cooldown))
     timeSinceLast = datetime.now()
-    while True:
+    while not stop_flag.is_set():
         new_time = datetime.now()
         diff = new_time - timeSinceLast
         # print(ship, diff)
@@ -793,7 +826,7 @@ def siphonLoop(ship, priority="NORMAL"):
     ship_stats = get_ship(ship, priority)
     capacity = ship_stats['data']['cargo']['capacity']
     inventory = ship_stats['data']['cargo']['units']
-    while True:
+    while not stop_flag.is_set():
         if capacity == inventory:
             time.sleep(20)
             ship_stats = get_ship(ship, priority)
@@ -905,7 +938,7 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
     if refining_ships:
         refinable_ores = ['IRON_ORE', "COPPER_ORE", "ALUMINUM_ORE", "SILVER_ORE", "GOLD_ORE", "PLATINUM_ORE", "URANITE_ORE", "MERITUM_ORE"]
 
-    while True:
+    while not stop_flag.is_set():
         try:
 
             ship = auto_nav(hauler, collection_waypoint)
@@ -917,7 +950,7 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
 
             lock.acquire()
             try:
-                while not full:
+                while not full and not stop_flag.is_set():
                     for e in excavators:
                         if capacity > inventory_size:
                             result = cargo(e)
@@ -944,7 +977,6 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
             finally:
                 lock.release()
 
-
             hauling.sell_off_existing_cargo(hauler)
 
         except TypeError:
@@ -966,7 +998,7 @@ def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
         "MERITUM_ORE": "MERITUM"
     }
 
-    while True:
+    while not stop_flag.is_set():
         try:
             auto_nav(refining_ship, asteroid)
 
@@ -1043,6 +1075,8 @@ def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
 
 
 def explorationRun(ship, destination_system, shipyard_waypoint):
+    if stop_flag.is_set():
+        return
     ship_stats = get_ship(ship)
     if ship_stats['data']['nav']['status'] == "DOCKED":
         orbit(ship)
@@ -1111,6 +1145,8 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
 
 
 def commandPhaseA(ship, priority="NORMAL"):
+    if stop_flag.is_set():
+        return
     # Initial funds to get 10 miner, 3 asteroid hauler, 3 surveyors, 2 siphons, 2 siphon haulers, 4 trade haulers
     ship_assignments = dbFunctions.get_ship_roles_from_access()
     ships_desired = {
@@ -1234,6 +1270,9 @@ def get_construction_materials(system, priority="NORMAL"):
 
 
 def commandPhaseB(ship, system=None, priority="NORMAL"):
+    if stop_flag.is_set():
+        return
+
     if system is None:
         system = SYSTEM
     # Find and deliver FAB_MATS and ADVANCED_CIRCUITRY when supplies are high and cash is above 1.5 million
@@ -1310,6 +1349,9 @@ def commandPhaseB(ship, system=None, priority="NORMAL"):
 
 
 def commandPhaseC(ship, priority="NORMAL"):
+    if stop_flag.is_set():
+        return
+
     ship_stats = get_ship(ship, priority)
     start_system = ship_stats["data"]["nav"]["systemSymbol"]
     explorer_system = None
@@ -1349,6 +1391,8 @@ def commandPhaseC(ship, priority="NORMAL"):
 
 
 def commandPhaseD(ship, system, priority="NORMAL"):
+    if stop_flag.is_set():
+        return
 
     ship_stats = auto_jump_warp(ship, system, priority=priority)
     ship_stats = scout_markets(ship, False, ship_stats, priority=priority)
@@ -1503,7 +1547,7 @@ def ships_to_names(ships):
 
 def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
     orbit(ship)
-    while True:
+    while not stop_flag.is_set():
         if len(surveys) < max_num_surveys:
             new_survey = createSurvey(ship)
             if "data" in new_survey.keys():
@@ -1548,7 +1592,7 @@ material_values = {
     "QUARTZ_SAND": 0,
     "SILICON_CRYSTALS": 0
 }
-last_hundred_survey_values = [0 for _ in range(100)]
+
 
 
 def is_good(survey):
@@ -1604,6 +1648,9 @@ update_material_values()
 
 
 def scout_markets(ship, need_to_chart=True, ship_stats=None, priority="NORMAL"):
+    if stop_flag.is_set():
+        raise ThreadStoppedException()
+
     if need_to_chart:
         chart_system(ship, ship_stats=ship_stats, priority=priority)
         ship_stats = None
@@ -1657,6 +1704,9 @@ def scout_markets(ship, need_to_chart=True, ship_stats=None, priority="NORMAL"):
 
 
 def market_scout_master(ship, system):
+    if stop_flag.is_set():
+        return
+
     def init_stationary_scout_dict():
         stationary_scout_dict = {}
 
@@ -1719,17 +1769,17 @@ def market_scout_master(ship, system):
 
     ship_stats = None
 
-    while True:
+    while not stop_flag.is_set():
         init_stationary_scout_dict()
         remote_check_in()
 
         ship_stats = scout_markets(ship, False, ship_stats)
-        time.sleep(3600)
+        tka_sleep(3600)
 
 
 def market_nurse(ship, system):
     ship_stats = None
-    while True:
+    while not stop_flag.is_set():
         construction_materials = get_construction_materials(system)
         ship_stats = hauling.replenish_economy(system, ship, ship_stats, True, avoid_sourcing=construction_materials.keys())
         ship_stats = hauling.choose_trade_run_loop(system, ship, loop=False, ship_data=ship_stats, ignored_goods=construction_materials.keys())
@@ -1828,35 +1878,40 @@ def main():
             time.sleep(0.3)  # prevents every thread from bombarding the database with queries simultaneously and crashing pyodbc
 
 
-    if __name__ == '__main__':
-        while len(threads) > 0:
-            time.sleep(3600)
-            ship_roles = dbFunctions.get_ship_roles_from_access()
-            for ship_role in ship_roles:
-                if ship_role['shipName'] not in considered_ships:
-                    x = make_thread(ship_role)
-                    considered_ships.append(ship_role['shipName'])
-                    if x is not None:
-                        threads.append((x, ship_role['shipName']))
-                        x.start()
 
-            role_map = {}
-            for s in ship_roles:
-                role_map[s['shipName']] = s
-            i = 0
-            while i < len(threads):
-                if threads[i][0].is_alive():
-                    i += 1
+    while len(threads) > 0:
+        try:
+            tka_sleep(3600, 60)
+        except WrongResetException or ServerMaintenanceException as e:
+            stop_threads_and_wait()
+            return e
+
+        ship_roles = dbFunctions.get_ship_roles_from_access()
+        for ship_role in ship_roles:
+            if ship_role['shipName'] not in considered_ships:
+                x = make_thread(ship_role)
+                considered_ships.append(ship_role['shipName'])
+                if x is not None:
+                    threads.append((x, ship_role['shipName']))
+                    x.start()
+
+        role_map = {}
+        for s in ship_roles:
+            role_map[s['shipName']] = s
+        i = 0
+        while i < len(threads):
+            if threads[i][0].is_alive():
+                i += 1
+            else:
+                ship_role = role_map[threads[i][1]]
+                x = make_thread(ship_role)
+                if x is None:
+                    threads.pop(i)
                 else:
-                    ship_role = role_map[threads[i][1]]
-                    x = make_thread(ship_role)
-                    if x is None:
-                        threads.pop(i)
-                    else:
-                        x.start()
-                        threads[i] = (x, ship_role['shipName'])
-                        i += 1
-    return threads
+                    x.start()
+                    threads[i] = (x, ship_role['shipName'])
+                    i += 1
+
 
 
 
@@ -1886,6 +1941,8 @@ if __name__ == '__main__':
         from __SHARED import conn
         main()
     except KeyboardInterrupt as k:
+        print("HALTING ALL THREADS")
+        SHARED.stop_threads_and_wait()
         conn.close()
         raise k
 

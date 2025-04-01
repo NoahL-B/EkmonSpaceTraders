@@ -48,7 +48,7 @@ def fill_table_defaults():
     y.start()
 
     x.join()
-    x = threading.Thread(target=hauling.choose_trade_run_loop, args=(SYSTEM, command_ship_name, ("FUEL", "FAB_MATS", "ADVANCED_CIRCUITRY")), daemon=True)
+    x = threading.Thread(name=UNAME + " threaded main", target=main, daemon=True)
     x.start()
 
     y.join()

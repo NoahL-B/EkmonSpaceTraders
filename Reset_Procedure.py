@@ -1,6 +1,7 @@
 import datetime as dt
 import os
 import shutil
+import threading
 import time
 
 from __SHARED import get_cursor
@@ -88,4 +89,16 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    secrets = main()["data"]["token"]
+    import SECRETS
+    SECRETS.TOKEN = secrets
+    import Startup_Procedure
+    Startup_Procedure.fill_table_defaults()
+    Startup_Procedure.stop_flag.set()
+    all_threads = threading.enumerate()
+    for t in all_threads:
+        if "EKMON" in t.name:
+            print(t)
+            t.join()
+    import main
+    main.main()

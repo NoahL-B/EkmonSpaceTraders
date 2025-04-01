@@ -4,11 +4,13 @@ import time
 import threading
 import requests
 
+BASE_URL = "https://api.staging.spacetraders.io/v2/"
+
 
 def rate_limit_retry(func, max_tries=10):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
-        tries = 1
+        tries = 0
         while result.status_code == 429 and tries < max_tries:
             tries += 1
             print("RATE LIMITED")
@@ -23,13 +25,20 @@ def rate_limit_retry(func, max_tries=10):
 def server_error_retry(func, max_tries=3):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
-        tries = 1
+        tries = 0
         while 500 <= result.status_code <= 599 and tries < max_tries:
-            print("SERVER FAILURE", result)
-            print(result.json())
+            if result.status_code != 503 or tries == 0:
+                print("SERVER FAILURE", result)
+                print(result.json())
             tries += 1
             time.sleep(2 ** tries / 2)
             result = func(*args, **kwargs)
+
+        if result.status_code == 503:
+            import SHARED
+            SHARED.stop_flag.set()
+            raise SHARED.ServerMaintenanceException()
+
         return result
     return wrapper
 
@@ -221,7 +230,7 @@ class RequestHandler:
         for header in headers.keys():
             full_headers[header] = headers[header]
 
-        url = 'https://api.spacetraders.io/v2/' + endpoint
+        url = BASE_URL + endpoint
         params_json = json.dumps(params)
 
         self.__wait_to_request()
@@ -244,6 +253,7 @@ class RequestHandler:
             return self.pacing_src / self.pacing_rc
         else:
             return self.successful_request_count / self.request_count
+
 
 def main():
     rh = RequestHandler()
