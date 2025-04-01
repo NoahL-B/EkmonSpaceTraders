@@ -1286,12 +1286,6 @@ def commandPhaseB(ship, system=None, priority="NORMAL"):
     dbFunctions.populate_jump_gates()
     init_master_jump_graph(force_new=True)
 
-    agent = api_functions.get_agent(TOKEN, priority)
-    faction_name = agent['data']['startingFaction']
-    faction = api_functions.get_faction(TOKEN, faction_name, priority)
-    headquarters = faction['data']['headquarters']
-    hq_system = api_functions.waypoint_name_to_system_name(headquarters)
-
     # disable mining ships, surveyors, and asteroid haulers
 
     ship_assignments = dbFunctions.get_ship_roles_from_access()
