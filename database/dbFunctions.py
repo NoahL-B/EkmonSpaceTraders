@@ -5,10 +5,11 @@ import time
 
 import pyodbc
 
+import SECRETS
 from database import Waypoint
-from database.System import *
+from database.System import listSystems, listWaypointsInSystem, api
 from SHARED import *
-from SECRETS import UNAME
+
 
 
 
@@ -155,7 +156,7 @@ def search_marketplaces_for_item(waypoint_list, item, imports=True, exports=True
     for wp in waypoint_list:
         wp_name = wp["symbol"]
         wp_system = wp["systemSymbol"]
-        mark = api.get_market(TOKEN, wp_system, wp_name)
+        mark = api.get_market(SECRETS.TOKEN, wp_system, wp_name)
         if search_marketplace_for_item(mark, item, imports, exports, exchange):
             stocked_markets.append(wp)
     return stocked_markets
@@ -226,10 +227,10 @@ def get_all_systems():
         num_pages += 1
 
     for page in range(1, num_pages + 1):
-        l = listSystems(systems_per_page, page)
-        for i in range(len(l['data'])):
-            all_systems.append(l["data"][i])
-            print(l["data"][i]["symbol"])
+        sys_list = listSystems(systems_per_page, page)
+        for i in range(len(sys_list['data'])):
+            all_systems.append(sys_list["data"][i])
+            print(sys_list["data"][i]["symbol"])
         print("Page", page, "of", num_pages)
 
     return all_systems
@@ -256,9 +257,9 @@ def get_all_waypoints_in_system(systemSymbol, noToken=False):
         num_pages += 1
 
     for page in range(2, num_pages + 1):
-        l = listWaypointsInSystem(systemSymbol, waypoints_per_page, page, noToken=noToken)
-        for i in range(len(l['data'])):
-            system_waypoints.append(l["data"][i])
+        wp_list = listWaypointsInSystem(systemSymbol, waypoints_per_page, page, noToken=noToken)
+        for i in range(len(wp_list['data'])):
+            system_waypoints.append(wp_list["data"][i])
 
     return system_waypoints
 
@@ -327,8 +328,12 @@ def too_many_tables_handler(func):
         try:
             result = func(*args, **kwargs)
             return result
-        except pyodbc.OperationalError as e:
+        except pyodbc.OperationalError:
             time.sleep(random.randint(1, 100))
+            result = func(*args, **kwargs)
+            return result
+        except pyodbc.Error:
+            print("problem spot")
             result = func(*args, **kwargs)
             return result
     return wrapper
@@ -336,12 +341,22 @@ def too_many_tables_handler(func):
 
 
 
-def populate_markets():
+def populate_markets(unknown_only=False):
     all_waypoints = get_waypoints_from_access()
+    existing_markets = get_markets_from_access()
     for wp in all_waypoints:
         for trait in wp["traits"]:
             if trait["symbol"] == "MARKETPLACE":
-                api.get_market(TOKEN, wp["systemSymbol"], wp["symbol"])
+                if unknown_only:
+                    need_to_populate = True
+                    for m in existing_markets:
+                        if m["symbol"] == wp["symbol"]:
+                            need_to_populate = False
+                            break
+                    if need_to_populate:
+                        api.get_market(SECRETS.TOKEN, wp["systemSymbol"], wp["symbol"])
+                else:
+                    api.get_market(SECRETS.TOKEN, wp["systemSymbol"], wp["symbol"])
 
 
 def populate_jump_gates():
@@ -354,7 +369,7 @@ def populate_jump_gates():
                     uncharted = True
             if not uncharted:
                 if access_get_jump_gate(wp["systemSymbol"]) is None:
-                    api.get_jump_gate(TOKEN, wp["systemSymbol"], wp["symbol"])
+                    api.get_jump_gate(SECRETS.TOKEN, wp["systemSymbol"], wp["symbol"])
 
 
 def populate_shipyards():
@@ -371,7 +386,7 @@ def populate_shipyards():
         wp_name = wp["symbol"]
         wp_system = wp["systemSymbol"]
         if wp_name not in shipyard_names:
-            api.get_shipyard(TOKEN, wp_system, wp_name)
+            api.get_shipyard(SECRETS.TOKEN, wp_system, wp_name)
 
 
 def populate_waypoints(all_systems, noToken=False, unknown_only=True):
@@ -638,13 +653,12 @@ def get_ship_roles_from_access():
         cursor.execute('SELECT * FROM ShipAssignments')
 
         for c in cursor:
-            ship_role = {}
-            ship_role['shipName'] = c[0]
-            ship_role['hasAssignment'] = c[1]
-            ship_role['assignmentType'] = c[2]
-            ship_role['systemSymbol'] = c[3]
-            ship_role['waypointSymbol'] = c[4]
-            if UNAME + "-" in ship_role['shipName']:
+            ship_role = {'shipName': c[0],
+                         'hasAssignment': c[1],
+                         'assignmentType': c[2],
+                         'systemSymbol': c[3],
+                         'waypointSymbol': c[4]}
+            if SECRETS.UNAME + "-" in ship_role['shipName']:
                 ship_roles.append(ship_role)
 
     return ship_roles
@@ -914,10 +928,10 @@ def jump_connection_exists(origin, destination):
         return False
 
     row = __jump_connection_exists(origin, destination)
-    if row:
+    if not isinstance(row, bool):
         return (row[0], row[2])
     row = __jump_connection_exists(destination, origin)
-    if row:
+    if not isinstance(row, bool):
         return (row[2], row[0])
 
     return False
@@ -1049,7 +1063,35 @@ def access_system_profits(system):
     return system_profits
 
 
-if __name__ == '__main__':
-    all_systems = get_systems_from_access()
-    populate_waypoints(all_systems)
+@too_many_tables_handler
+def access_select_star(from_table: str, where_column_names: None | list[str] = None, where_values: None | list[str] = None):
 
+    cmd = "SELECT * FROM " + from_table
+    if where_column_names is not None and where_values is not None:
+        first_item = True
+        for column_name in where_column_names:
+            if first_item:
+                cmd += " WHERE "
+                first_item = False
+            else:
+                cmd += " AND "
+            cmd += column_name + "=?"
+
+    results = []
+
+    with get_cursor() as cursor:
+        cursor.execute(cmd, where_values)
+        for row in cursor:
+            result_row = []
+            for item in row:
+                result_row.append(item)
+            results.append(result_row)
+
+    return results
+
+
+
+
+if __name__ == '__main__':
+    all_sys = get_systems_from_access()
+    populate_waypoints(all_sys)

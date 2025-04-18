@@ -1,4 +1,4 @@
-from SECRETS import TOKEN
+import SECRETS
 import api_requests.api_functions as api
 
 class System:
@@ -41,17 +41,17 @@ class System:
 
 
 def getSystem(systemSymbol):
-    data = api.get_system(TOKEN, systemSymbol)
+    data = api.get_system(SECRETS.TOKEN, systemSymbol)
     return System(data)
 
 
 def listSystems(limit=10, page=1):
-    data = api.list_systems(TOKEN, limit, page)
+    data = api.list_systems(SECRETS.TOKEN, limit, page)
     return data
 
 
 def listWaypointsInSystem(systemSymbol, limit=10, page=1, noToken=False):
-    tok = TOKEN
+    tok = SECRETS.TOKEN
     if noToken:
         tok = None
     data = api.list_waypoints_in_system(tok, systemSymbol, limit=limit, page=page)

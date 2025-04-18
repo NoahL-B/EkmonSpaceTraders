@@ -1,3 +1,5 @@
+import SHARED
+import SECRETS
 from main import *
 from api_requests import api_functions as api
 import economy
@@ -5,6 +7,10 @@ import economy
 
 def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, destination_type="MARKET",
                 stop_on_unprofitable_origin=True, stop_on_unprofitable_destination=True):
+
+    if SHARED.stop_flag.is_set():
+        raise ThreadStoppedException()
+
     sell_off_existing_cargo(ship)
 
     print("Flying", ship, "from", origin_waypoint, "to", destination_waypoint, "transporting", product, "to a",
@@ -15,10 +21,12 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
     capacity = cargo['capacity']
 
     while True:
+        if SHARED.stop_flag.is_set():
+            raise ThreadStoppedException()
         auto_nav(ship, origin_waypoint)
         dock(ship)
 
-        origin_market = api.get_market(TOKEN, system, origin_waypoint)
+        origin_market = api.get_market(SECRETS.TOKEN, system, origin_waypoint)
 
         origin_target_good = None
         origin_trade_goods = origin_market['data']['tradeGoods']
@@ -79,7 +87,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
 
         if destination_type == 'MARKET':
 
-            destination_market = api.get_market(TOKEN, system, destination_waypoint)
+            destination_market = api.get_market(SECRETS.TOKEN, system, destination_waypoint)
 
             target_good = None
             trade_goods = destination_market['data']['tradeGoods']
@@ -151,7 +159,7 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
             num_to_deliver = min(num_required, num_to_offload)
             if num_to_deliver == 0:
                 print('Completed contract for this product')
-                fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
+                fulfill = api.fulfill_contract(SECRETS.TOKEN, contract_map['id'])
                 if fulfill:
                     print('Completed entire contract')
                 return
@@ -163,6 +171,9 @@ def trade_cycle(ship, product, system, origin_waypoint, destination_waypoint, de
 
 
 def trade_run(ship, product, system, origin_waypoint, destination_waypoint, destination_type="MARKET", ship_stats=None):
+
+    if SHARED.stop_flag.is_set():
+        raise ThreadStoppedException()
 
     origin_target_good = None
     origin_trade_goods = dbFunctions.access_get_market(origin_waypoint)
@@ -207,7 +218,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
         p = purchase(ship, product, trade_volume)
 
         if not p or 'data' not in p.keys():
-            a = api.get_agent(TOKEN)
+            a = api.get_agent(SECRETS.TOKEN)
             c = a['data']['credits'] - 5000
             num_can_buy = c // origin_target_good['purchasePrice']
             num_to_buy = min(num_can_buy, num_to_buy)
@@ -226,7 +237,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
         p = purchase(ship, product, num_to_buy)
 
     if not p or "data" not in p.keys():
-        a = api.get_agent(TOKEN)
+        a = api.get_agent(SECRETS.TOKEN)
         c = a['data']['credits'] - 5000
         num_can_buy = c // origin_target_good['purchasePrice']
         num_to_buy = min(num_can_buy, num_to_buy)
@@ -309,7 +320,7 @@ def trade_run(ship, product, system, origin_waypoint, destination_waypoint, dest
         num_to_deliver = min(num_required, num_to_offload)
         if num_to_deliver == 0:
             print('Completed contract for this product')
-            fulfill = api.fulfill_contract(TOKEN, contract_map['id'])
+            fulfill = api.fulfill_contract(SECRETS.TOKEN, contract_map['id'])
             if "data" in fulfill.keys():
                 print('Completed entire contract')
             return ship_stats
@@ -380,6 +391,9 @@ def sell_off_existing_cargo(ship, ship_stats=None):
 
 def choose_trade_loop(system, ship, ignored_goods=None):
 
+    if SHARED.stop_flag.is_set():
+        raise ThreadStoppedException()
+
     if ignored_goods is None:
         ignored_goods = ()
 
@@ -409,6 +423,9 @@ def choose_trade_loop(system, ship, ignored_goods=None):
 
 
 def choose_trade_run_loop(system, ship, ignored_goods=None, loop=True, ship_data=None):
+    if SHARED.stop_flag.is_set():
+        raise ThreadStoppedException()
+
     initial_profitable_trades = dbFunctions.access_profitable_trades(system)
     if len(initial_profitable_trades) == 0:
         print(ship, "has no available profitable trades in", system)
@@ -420,6 +437,8 @@ def choose_trade_run_loop(system, ship, ignored_goods=None, loop=True, ship_data
     do_once = True
 
     while loop or do_once:
+        if SHARED.stop_flag.is_set():
+            raise ThreadStoppedException()
         do_once = False
         profitable_trades = dbFunctions.access_profitable_trades(system)
 
@@ -454,6 +473,9 @@ def choose_trade_run_loop(system, ship, ignored_goods=None, loop=True, ship_data
 
 
 def stimulate_economy(system, ship, good):
+    if SHARED.stop_flag.is_set():
+        raise ThreadStoppedException()
+
     predecessors = economy.get_immediate_predecessors([good])
     traded_goods = False
     if len(predecessors) == 0:
@@ -481,6 +503,8 @@ def replenish_economy(system, ship, ship_stats=None, loop=True, avoid_sourcing=N
     if avoid_sourcing is None:
         avoid_sourcing = []
     while loop or do_once:
+        if SHARED.stop_flag.is_set():
+            raise ThreadStoppedException()
         do_once = False
 
         replenishing_trades = dbFunctions.access_replenishing_trades(system)

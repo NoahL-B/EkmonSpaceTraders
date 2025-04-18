@@ -3,6 +3,7 @@ import json
 import time
 import threading
 import requests
+import __SHARED as SHARED
 
 BASE_URL = "https://api.staging.spacetraders.io/v2/"
 
@@ -26,6 +27,10 @@ def server_error_retry(func, max_tries=3):
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
         tries = 0
+        if result.status_code == 401:
+            SHARED.stop_flag.set()
+            raise SHARED.WrongResetException()
+
         while 500 <= result.status_code <= 599 and tries < max_tries:
             if result.status_code != 503 or tries == 0:
                 print("SERVER FAILURE", result)
@@ -35,7 +40,6 @@ def server_error_retry(func, max_tries=3):
             result = func(*args, **kwargs)
 
         if result.status_code == 503:
-            import SHARED
             SHARED.stop_flag.set()
             raise SHARED.ServerMaintenanceException()
 
@@ -87,7 +91,7 @@ class RequestHandler:
             self.queue_lock.release()
 
             if self.printouts:
-                printout = print_builder(self.queue_len(), self.request_count, self.successful_request_count, str(self.get_rpm())[:5], *args[:4])
+                printout = print_builder(self.queue_len(), self.request_count, self.successful_request_count, str(self.get_rpm(pacing=True))[:5], *args[:4])
                 with self.print_lock:
                     print(printout)
 
@@ -123,6 +127,8 @@ class RequestHandler:
         queue_item = (result, func, args)
         self.__add_to_queue(queue_item, priority=priority)
         while not result:
+            if SHARED.stop_flag.is_set():
+                raise SHARED.ThreadStoppedException()
             self.__fulfill_queue()
 
         return result[0]
@@ -139,6 +145,12 @@ class RequestHandler:
             old = self.recent_burst_times[0]
             if (now - old) > burst_delta:
                 self.recent_burst_times = []
+
+    def flush_queue(self):
+        with self.queue_lock:
+            self.request_queue["HIGH"] = []
+            self.request_queue["NORMAL"] = []
+            self.request_queue["LOW"] = []
 
     def start_pacing(self):
         self.pacing_rc = 0

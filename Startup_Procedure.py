@@ -1,11 +1,14 @@
 # RUN RESET PROCEDURE BEFORE THE STARTUP PROCEDURE!!!
 
-from SECRETS import *
+import SECRETS
+import main
 from main import *
-import hauling
 
 
 def fill_table_defaults():
+
+    init_globals()
+
     command_ship_name = UNAME + "-1"
     satellite_ship_name = UNAME + "-2"
 
@@ -24,22 +27,27 @@ def fill_table_defaults():
 
         cursor.execute("SELECT * FROM Transactions")
         if cursor.fetchone() is None:
-            agent = api_functions.get_agent(TOKEN)
-            starting_credits = agent["data"]["credits"]
-            hq = agent["data"]["headquarters"]
-            dbFunctions.access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "transactionTime"], [command_ship_name, hq, SYSTEM, starting_credits, datetime.now(timezone.utc)])
+            agent = api_functions.get_agent(SECRETS.TOKEN)
+            if "data" in agent.keys():
+                starting_credits = agent["data"]["credits"]
+                hq = agent["data"]["headquarters"]
+                dbFunctions.access_insert_entry("Transactions", ["Ship", "Waypoint", "System", "Credits", "transactionTime"], [command_ship_name, hq, SYSTEM, starting_credits, datetime.now(timezone.utc)])
+            else:
+                print(agent)
+                raise Exception("Unknown problem fetching agent data")
 
 
-    # all_systems = dbFunctions.get_all_systems()
-    all_systems = dbFunctions.get_systems_dot_json()
+    all_systems = dbFunctions.get_all_systems()
+    # all_systems = dbFunctions.get_systems_dot_json()
     dbFunctions.populate_systems(all_systems)
 
     for s in all_systems:
         if s['symbol'] == SYSTEM:
             dbFunctions.populate_waypoints([s])
-            dbFunctions.populate_markets()
+            dbFunctions.populate_markets(unknown_only=True)
 
-    api_functions.patch_ship_nav(TOKEN, command_ship_name, "BURN")
+    api_functions.patch_ship_nav(SECRETS.TOKEN, command_ship_name, "BURN")
+
 
     x = threading.Thread(target=scout_markets, args=(command_ship_name, False))
     x.start()
@@ -52,7 +60,7 @@ def fill_table_defaults():
     x.start()
 
     y.join()
-    y = threading.Thread(target=dbFunctions.populate_markets)
+    y = threading.Thread(target=dbFunctions.populate_markets, args=(True,))
     y.start()
     y.join()
 
@@ -63,6 +71,10 @@ def fill_table_defaults():
     y = threading.Thread(target=dbFunctions.populate_jump_gates)
     y.start()
     y.join()
+
+    # TODO: verify that the startup is actually complete before checking the box for startup completion.
+
+    dbFunctions.access_update_entry("ID", ["StartupComplete"], [True], ["UNAME"], [SECRETS.UNAME])
 
 
 

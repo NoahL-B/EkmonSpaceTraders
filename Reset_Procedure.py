@@ -10,7 +10,7 @@ import api_requests.raw_api_requests as rar
 
 cursor = get_cursor()
 
-UTC_NOW = dt.datetime.now(dt.timezone.utc)
+
 TARGET_UNAME = UNAME
 STARTING_FACTION = "VOID"
 
@@ -21,6 +21,8 @@ STARTING_FACTION = "VOID"
 
 
 def get_weekly_folder():
+    UTC_NOW = dt.datetime.now(dt.timezone.utc)
+
     folder_name = str(UTC_NOW.month) + "-"
     folder_name += str(UTC_NOW.day) + "-"
     folder_name += str(UTC_NOW.year) + "--"
@@ -97,7 +99,7 @@ if __name__ == '__main__':
     Startup_Procedure.stop_flag.set()
     all_threads = threading.enumerate()
     for t in all_threads:
-        if "EKMON" in t.name:
+        if SECRETS.UNAME in t.name:
             print(t)
             t.join()
     import main

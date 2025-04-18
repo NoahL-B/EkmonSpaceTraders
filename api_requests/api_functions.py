@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import time
 
-import SHARED
+import __SHARED as SHARED
 import api_requests.raw_api_requests as raw_api_requests
 from api_requests.raw_api_requests import get_status, register_new_agent, get_agent, list_agents, get_public_agent, list_contracts, get_contract, accept_contract, deliver_cargo_to_contract, fulfill_contract, list_factions, get_faction, list_ships, purchase_ship, get_ship, get_ship_cargo, orbit_ship, ship_refine, create_chart, get_ship_cooldown, dock_ship, create_survey, extract_resources, siphon_resources, extract_resources_with_survey, jettison_cargo, navigate_ship, patch_ship_nav, get_ship_nav, warp_ship, scan_systems, scan_waypoints, scan_ships, negotiate_contract, get_mounts, install_mount, remove_mount, get_scrap_ship, get_repair_ship, list_systems, get_system, list_waypoints_in_system, get_waypoint, get_construction_site, supply_construction_site # noqa
 from database.dbFunctions import access_record_market, access_record_shipyard, access_record_jump_gate, access_insert_entry
@@ -200,7 +200,7 @@ def navigate(token, ship, location, nav_and_sleep=False, priority="NORMAL"):
         if nav['status'] == 'IN_TRANSIT':
             if nav['route']['destination']['symbol'] == location:
                 if nav_and_sleep:
-                    time.sleep(nav_to_time_delay(ship_status))
+                    SHARED.tka_sleep(nav_to_time_delay(ship_status))
                 return ship_status
             else:
                 return to_return
@@ -215,7 +215,7 @@ def navigate(token, ship, location, nav_and_sleep=False, priority="NORMAL"):
 
     if nav_and_sleep:
         try:
-            time.sleep(nav_to_time_delay(to_return))
+            SHARED.tka_sleep(nav_to_time_delay(to_return))
         except ValueError:
             pass
     return to_return

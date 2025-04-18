@@ -1,5 +1,6 @@
-from SECRETS import TOKEN
+import SECRETS
 import api_requests.api_functions as api
+
 
 class Waypoint:
 
@@ -54,7 +55,7 @@ class Waypoint:
 
 
 def getWaypoint(systemSymbol, waypointSymbol, priority="NORMAL"):
-    data = api.get_waypoint(TOKEN, systemSymbol, waypointSymbol, priority=priority)['data']
+    data = api.get_waypoint(SECRETS.TOKEN, systemSymbol, waypointSymbol, priority=priority)['data']
     return Waypoint(data)
 
 

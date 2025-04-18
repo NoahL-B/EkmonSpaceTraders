@@ -22,6 +22,7 @@ last_hundred_survey_values = [0 for _ in range(100)]
 
 
 def init_globals():
+    from SECRETS import TOKEN
     global SYSTEM
     global ASTEROIDS
     global GAS_GIANT
@@ -33,8 +34,8 @@ def init_globals():
     SYSTEM = hql[0] + "-" + hql[1]
 
     waypoints_list = dbFunctions.get_waypoints_from_access(SYSTEM)
-
-    # waypoints_list = dbFunctions.get_all_waypoints_in_system(SYSTEM)
+    if len(waypoints_list) < 5:
+        waypoints_list = dbFunctions.get_all_waypoints_in_system(SYSTEM)
     for wp in waypoints_list:
         if wp['type'] == "ENGINEERED_ASTEROID":
             ASTEROIDS = wp['symbol']
@@ -127,6 +128,9 @@ def navigate(ship, location, nav_and_sleep=False, priority="NORMAL"):
 def auto_nav(ship, destination, ship_stats=None, cargo_refuel=False, priority="NORMAL"):
     if stop_flag.is_set():
         raise ThreadStoppedException()
+
+    if destination in [None, ""]:
+        raise KeyError("No destination set in AutoNav")
 
     if ship_stats is None:
         ship_stats = get_ship(ship, priority=priority)
@@ -360,7 +364,7 @@ def jump(ship, waypoint, jump_and_sleep=False, priority="NORMAL"):
     to_return = api_functions.jump_ship(TOKEN, ship, waypoint, priority)
     if jump_and_sleep:
         sleep_time = to_return["data"]["cooldown"]["totalSeconds"]
-        time.sleep(sleep_time)
+        tka_sleep(sleep_time, 60)
     return to_return
 
 
@@ -371,7 +375,7 @@ def warp(ship, waypoint, warp_and_sleep=False, priority="NORMAL"):
     to_return = api_functions.warp_ship(TOKEN, ship, waypoint, priority=priority)
     if warp_and_sleep:
         sleep_time = nav_to_time_delay(to_return)
-        time.sleep(sleep_time)
+        tka_sleep(sleep_time, 60)
     return to_return
 
 
@@ -605,6 +609,15 @@ def sleep_until_arrival(ship, sleep_counter=False, ship_data=None, priority="NOR
     return ship_data
 
 
+def thread_stop_clean_exit(func):
+    def thread_stop_clean_exit_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except (ThreadStoppedException, ServerMaintenanceException, WrongResetException):
+            return None
+    return thread_stop_clean_exit_wrapper
+
+
 def chart_system(ship, ship_stats=None, cargo_refuel=False, priority="NORMAL"):
     if stop_flag.is_set():
         raise ThreadStoppedException()
@@ -695,6 +708,7 @@ def chart_wp(ship, priority="NORMAL"):
     return api_functions.create_chart(TOKEN, ship, priority)
 
 
+@thread_stop_clean_exit
 def charting_explorer(ship, system=None, cargo_refuel=True, priority="NORMAL"):
     ship_stats = get_ship(ship, priority)
     if not system:
@@ -776,9 +790,9 @@ def charting_explorer(ship, system=None, cargo_refuel=True, priority="NORMAL"):
         dbFunctions.access_update_ship_assignment(ship, assignmentSystem=system)
 
 
-
-def minerLoop(ship, lock=None, surveys=None, priority="NORMAL"):
-    orbit(ship, priority)
+@thread_stop_clean_exit
+def minerLoop(ship, waypoint, lock=None, surveys=None, priority="NORMAL"):
+    ship_stats = auto_nav(ship, waypoint, priority=priority)
     cooldown = api_functions.get_ship_cooldown(TOKEN, ship, priority)
     time.sleep(api_functions.cooldown_to_time_delay(cooldown))
     timeSinceLast = datetime.now()
@@ -794,32 +808,42 @@ def minerLoop(ship, lock=None, surveys=None, priority="NORMAL"):
                     time.sleep(1)
                 if len(surveys) > 0:
                     survey = surveys.pop(0)
+                    if survey["symbol"] != waypoint:
+                        survey = None
+                        print("SURVEYOR AT WRONG LOCATION")
                 lock.release()
             extraction = extract(ship, survey, priority=priority)
-            if "data" not in extraction.keys():
-                print(ship + ": " + str(extraction))
-            elif extraction['data']['extraction']['yield']['units'] > 0:
-                # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
-                if extraction['data']['extraction']['yield']['symbol'] not in ['IRON', 'QUARTZ_SAND', 'IRON_ORE', 'ELECTRONICS', 'MICROPROCESSORS', 'SILICON_CRYSTALS', 'COPPER', 'COPPER_ORE']:
-                    api_functions.jettison_cargo(TOKEN, ship, extraction['data']['extraction']['yield']['symbol'],
-                                                 extraction['data']['extraction']['yield']['units'],
-                                                 "HIGH")  # only high priority because we don't want the mining haulers to see the item in inventory and attempt to collect it.
-
-            if "error" in extraction.keys() and extraction["error"]["code"] == 4221:  # survey expired
-                # print("Survey expired and extraction failed")
-                pass
-            elif "error" in extraction.keys() and extraction["error"]["code"] == 4253:  # asteroid unstable
-                time.sleep(random.randint(3400, 3600))
+            if "data" in extraction.keys():
+                if extraction['data']['extraction']['yield']['units'] > 0:
+                    # print(ship + ": Extracted " + str(extraction['data']['extraction']['yield']['units']) + " " + extraction['data']['extraction']['yield']['symbol'])
+                    if extraction['data']['extraction']['yield']['symbol'] not in ['IRON', 'QUARTZ_SAND', 'IRON_ORE', 'ELECTRONICS', 'MICROPROCESSORS', 'SILICON_CRYSTALS', 'COPPER', 'COPPER_ORE']:
+                        api_functions.jettison_cargo(TOKEN, ship, extraction['data']['extraction']['yield']['symbol'],
+                                                     extraction['data']['extraction']['yield']['units'],
+                                                     "HIGH")  # only high priority because we don't want the mining haulers to see the item in inventory and attempt to collect it.
             else:
-                cooldown = extraction["data"]["cooldown"]["remainingSeconds"]
-                time.sleep(cooldown)
-        except TypeError as e:
+                error_code = extraction["error"]["code"]
+                if error_code not in [4221, 400, 4000]:
+                    print(ship + ": " + str(extraction))
+                if error_code == 4221:  # survey expired
+                    # print("Survey expired and extraction failed")
+                    pass
+                elif error_code == 4253:  # asteroid unstable
+                    tka_sleep(random.randint(3400, 3600))
+                elif error_code == 400:  # survey location does not match ship location
+                    print("SURVEYOR AT WRONG LOCATION")
+                elif error_code == 4000:  # still on cooldown
+                    cooldown = extraction["error"]["data"]["cooldown"]["remainingSeconds"]
+                    time.sleep(cooldown)
+                else:
+                    print("UNKNOWN ERROR IN EXTRACTION!")
+        except TypeError or KeyError as e:
             print(ship + ": ****************************ERROR************************")
             print(e)
             orbit(ship, priority=priority)
             time.sleep(70)
 
 
+@thread_stop_clean_exit
 def siphonLoop(ship, priority="NORMAL"):
     orbit(ship, priority)
     timeSinceLast = datetime.now()
@@ -859,76 +883,15 @@ def siphonLoop(ship, priority="NORMAL"):
                 time.sleep(70)
 
 
-def haulerLoop(ship, contract, origin, use_jump_nav=False, jump_nav_gates_to_origin=None,
-               jump_nav_systems_to_origin=None, jump_nav_gates_to_destination=None,
-               jump_nav_systems_to_destination=None, item=None, destination=None, required=None, fulfilled=None,
-               max_price=None):
-    c = api_functions.get_contract(TOKEN, contract)
-    if required is None:
-        required = c["data"]["terms"]["deliver"][0]["unitsRequired"]
-        print("required", required)
-    if fulfilled is None:
-        fulfilled = c["data"]["terms"]["deliver"][0]["unitsFulfilled"]
-        print("fulfilled", fulfilled)
-    if destination is None:
-        destination = c["data"]["terms"]["deliver"][0]["destinationSymbol"]
-        print("destination", destination)
-    if item is None:
-        item = c["data"]["terms"]["deliver"][0]["tradeSymbol"]
-        print("item", item)
-    if max_price is None:
-        start_credits = c["data"]["terms"]["payment"]["onAccepted"]
-        end_credits = c["data"]["terms"]["payment"]["onFulfilled"]
-        total = start_credits + end_credits
-        max_price = total / required
-        print("max price per unit", max_price)
-
-    too_expensive = False
-    while required > fulfilled and not too_expensive:
-        orbit(ship)
-        if use_jump_nav:
-            jumpNav(ship, jump_nav_gates_to_origin, jump_nav_systems_to_origin, origin)
-        else:
-            nav = navigate(ship, origin)
-            print(nav)
-            time.sleep(nav_to_time_delay(nav) + 1)
-        dock(ship)
-        to_purchase = required - fulfilled
-        if to_purchase > 120:
-            purchase(ship, item, 60)
-            p = purchase(ship, item, 60)
-            numPurchased = 120
-        elif 60 < to_purchase:
-            purchase(ship, item, 60)
-            p = purchase(ship, item, to_purchase - 60)
-            numPurchased = to_purchase
-        else:
-            purchase(ship, item, to_purchase)
-            p = numPurchased = to_purchase
-        orbit(ship)
-        if use_jump_nav:
-            jumpNav(ship, jump_nav_gates_to_destination, jump_nav_systems_to_destination, destination)
-        else:
-            nav = navigate(ship, destination)
-            print(nav)
-            time.sleep(nav_to_time_delay(nav) + 1)
-
-        dock(ship)
-        d = deliver(ship, item, numPurchased, contract)
-        fulfilled += numPurchased
-        print(d["data"]["contract"]["terms"]["deliver"])
-        fulfilled = d["data"]["contract"]["terms"]["deliver"][0]["unitsFulfilled"]
-        refuel(ship)
-        if p is not None:
-            if p["data"]["transaction"]["pricePerUnit"] >= max_price:
-                too_expensive = True
-
-    return not too_expensive
-
-
 import hauling
 
 
+@thread_stop_clean_exit
+def haulerLoopA(system, ship, ignored_goods=None, loop=True, ship_data=None):
+    hauling.choose_trade_run_loop(system, ship, ignored_goods, loop, ship_data)
+
+
+@thread_stop_clean_exit
 def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_ships=None):
     hauler = hauling_ship
     excavators = mining_ships
@@ -983,6 +946,7 @@ def haulerLoopB(hauling_ship, mining_ships, lock, collection_waypoint, refining_
             time.sleep(60)
 
 
+@thread_stop_clean_exit
 def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
 
     asteroid = "X1-DP28-DC5X"
@@ -1062,7 +1026,7 @@ def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
                                     i = processed_goods.pop()
                                     num_to_transfer = min(empty_space, i['units'])
                                     t = api_functions.transfer_cargo(TOKEN, refining_ship, h, i['symbol'], num_to_transfer)
-                                    print("Transfered refined goods back to haulers:", t)
+                                    print("Transferred refined goods back to haulers:", t)
                                     empty_space -= num_to_transfer
                 finally:
                     hauling_lock.release()
@@ -1071,9 +1035,10 @@ def refinerLoop(refining_ship, extraction_ships, hauling_ships, hauling_lock):
 
         except TypeError as e:
             raise e
-            #time.sleep(60)
+            # time.sleep(60)
 
 
+@thread_stop_clean_exit
 def explorationRun(ship, destination_system, shipyard_waypoint):
     if stop_flag.is_set():
         return
@@ -1107,7 +1072,7 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
             assignment = "MARKET_NURSE"
 
         new_ship = api_functions.buyLightHauler(TOKEN, shipyard_waypoint)
-        if type(new_ship) == str:
+        if isinstance(new_ship, str):
             new_ship_name = new_ship
             dbFunctions.access_add_ship_assignment(new_ship_name, True, assignment, destination_system)
             if assignment == "TRADE_HAULER":
@@ -1144,6 +1109,7 @@ def explorationRun(ship, destination_system, shipyard_waypoint):
     dbFunctions.access_update_ship_assignment(ship, assignmentType="CHARTING_EXPLORER")
 
 
+@thread_stop_clean_exit
 def commandPhaseA(ship, priority="NORMAL"):
     if stop_flag.is_set():
         return
@@ -1218,8 +1184,9 @@ def commandPhaseA(ship, priority="NORMAL"):
 
     for assignment_type, num in ships_desired.items():
         while num > 0:
-            while api_functions.get_agent(TOKEN, priority)['data']['credits'] < 1000000:
+            while api_functions.get_credits(TOKEN) < 1000000:
                 hauling.choose_trade_run_loop(SYSTEM, ship, ["FUEL", "ADVANCED_CIRCUITRY", "FAB_MATS"], False)
+                time.sleep(2)
 
             start_ship(assignment_type)
             num -= 1
@@ -1227,7 +1194,7 @@ def commandPhaseA(ship, priority="NORMAL"):
     ship_assignments = dbFunctions.get_ship_roles_from_access()
     ships_desired = {
         "ASTEROID_HAULER": 3,
-        "MINING_SHIP": 10,
+        "MINING_SHIP": 7,
         "TRADE_HAULER": 4,
         "SIPHON_SHIP": 2,
         "GAS_GIANT_HAULER": 2,
@@ -1235,7 +1202,7 @@ def commandPhaseA(ship, priority="NORMAL"):
         "COMMAND_PHASE_B": 1
     }
     for s in ship_assignments:
-        if s['assignmentType'] in ships_desired.keys():
+        if s["hasAssignment"] and s['assignmentType'] in ships_desired.keys():
             ships_desired[s['assignmentType']] -= 1
 
     for assignment_type, num in ships_desired.items():
@@ -1254,6 +1221,7 @@ def find_construction(system):
     for wp in waypoints:
         if wp['isUnderConstruction']:
             return wp['symbol']
+    return None
 
 
 def get_construction_materials(system, priority="NORMAL"):
@@ -1269,6 +1237,7 @@ def get_construction_materials(system, priority="NORMAL"):
     return construction_dict
 
 
+@thread_stop_clean_exit
 def commandPhaseB(ship, system=None, priority="NORMAL"):
     if stop_flag.is_set():
         return
@@ -1339,9 +1308,10 @@ def commandPhaseB(ship, system=None, priority="NORMAL"):
 
 
     dbFunctions.access_update_ship_assignment(ship, assignmentType="COMMAND_PHASE_C", assignmentSystem="", assignmentWaypoint="")
-    commandPhaseC(ship, priority)
+    stop_threads_and_wait()
 
 
+@thread_stop_clean_exit
 def commandPhaseC(ship, priority="NORMAL"):
     if stop_flag.is_set():
         return
@@ -1383,7 +1353,7 @@ def commandPhaseC(ship, priority="NORMAL"):
     commandPhaseD(ship, explorer_system, priority)
 
 
-
+@thread_stop_clean_exit
 def commandPhaseD(ship, system, priority="NORMAL"):
     if stop_flag.is_set():
         return
@@ -1468,7 +1438,7 @@ def commandPhaseD(ship, system, priority="NORMAL"):
             dbFunctions.access_add_ship_assignment(new_ship_name, True, "EXPLORER", destination_system, destination_shipyard)
 
     for faction in all_factions:
-        faction_stats = api_functions.get_faction(TOKEN, faction, priority)
+        faction_stats = api_functions.get_faction(TOKEN, faction, priority)  # TODO: replace with Access HQ finder, since it also captures factions without HQs
         faction_hq = faction_stats['data']['headquarters']
         if faction_hq:
             faction_system = api_functions.waypoint_name_to_system_name(faction_hq)
@@ -1538,7 +1508,7 @@ def ships_to_names(ships):
 
 
 
-
+@thread_stop_clean_exit
 def survey_loop(ship, lock: threading.Lock, surveys, max_num_surveys=100):
     orbit(ship)
     while not stop_flag.is_set():
@@ -1641,6 +1611,7 @@ def update_material_values():
 update_material_values()
 
 
+@thread_stop_clean_exit
 def scout_markets(ship, need_to_chart=True, ship_stats=None, priority="NORMAL"):
     if stop_flag.is_set():
         raise ThreadStoppedException()
@@ -1697,6 +1668,7 @@ def scout_markets(ship, need_to_chart=True, ship_stats=None, priority="NORMAL"):
     return ship_stats
 
 
+@thread_stop_clean_exit
 def market_scout_master(ship, system):
     if stop_flag.is_set():
         return
@@ -1738,7 +1710,7 @@ def market_scout_master(ship, system):
                 if shipyard is not None and dbFunctions.access_system_profits(system) > 0 and agent_credits > 1500000:
                     ship_name = api_functions.buyProbe(TOKEN, shipyard)
                     agent_credits = 0
-                    if type(ship_name) == str:
+                    if isinstance(ship_name, str):
                         stationary_scout_dict[waypoint] = ship_name
                         dbFunctions.access_add_ship_assignment(ship_name, True, "STATIONARY_SCOUT", system, waypoint)
                     else:
@@ -1771,6 +1743,7 @@ def market_scout_master(ship, system):
         tka_sleep(3600)
 
 
+@thread_stop_clean_exit
 def market_nurse(ship, system):
     ship_stats = None
     while not stop_flag.is_set():
@@ -1815,7 +1788,7 @@ def main():
         if ship_role['hasAssignment']:
 
             if ship_role['assignmentType'] == "MINING_SHIP":
-                t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], survey_lock, surveys[ship_role['waypointSymbol']]), daemon=True)
+                t = threading.Thread(target=minerLoop, args=(ship_role['shipName'], ship_role['waypointSymbol'], survey_lock, surveys[ship_role['waypointSymbol']]), daemon=True)
             elif ship_role['assignmentType'] == "SIPHON_SHIP":
                 t = threading.Thread(target=siphonLoop, args=(ship_role['shipName'],), daemon=True)
             elif ship_role['assignmentType'] == "SURVEYOR":
@@ -1825,7 +1798,7 @@ def main():
                     construction_materials = get_construction_materials(SYSTEM).keys()
                 else:
                     construction_materials = []
-                t = threading.Thread(target=hauling.choose_trade_run_loop, args=(ship_role['systemSymbol'], ship_role['shipName'], construction_materials), daemon=True)
+                t = threading.Thread(target=haulerLoopA, args=(ship_role['systemSymbol'], ship_role['shipName'], construction_materials), daemon=True)
             elif ship_role['assignmentType'] == "ASTEROID_HAULER":
                 if ship_role['waypointSymbol'] in mining_ships.keys():
                     t = threading.Thread(target=haulerLoopB, args=(ship_role['shipName'], mining_ships[ship_role['waypointSymbol']], mining_collection_lock, ship_role['waypointSymbol']), daemon=True)
@@ -1878,7 +1851,7 @@ def main():
             tka_sleep(3600, 60)
         except WrongResetException or ServerMaintenanceException as e:
             stop_threads_and_wait()
-            return e
+            raise e
 
         ship_roles = dbFunctions.get_ship_roles_from_access()
         for ship_role in ship_roles:
@@ -1939,5 +1912,3 @@ if __name__ == '__main__':
         SHARED.stop_threads_and_wait()
         conn.close()
         raise k
-
-
